@@ -50,8 +50,8 @@ def print_result(result: TrendResult, verbose: bool = None):
     verbose = verbose if verbose is not None else CFG.alerts.verbose
     is_trend = result.is_trending
 
-    if not is_trend and not CFG.alerts.print_all:
-        # One-liner for no-trend results
+    # One-liner for clean no-trend (not veto-killed)
+    if not is_trend and not result.veto_killed and not CFG.alerts.print_all:
         print(
             _c(f"  ➡️  {result.ticker:<12} {result.timeframe:<4}", _GREY) +
             _c(f"  NO TREND  ", _GREY) +
@@ -60,13 +60,20 @@ def print_result(result: TrendResult, verbose: bool = None):
         return
 
     # ── Full alert box ───────────────────────────────────────────────────────
-    border_color = _GREEN if result.direction == "up" else (_RED if result.direction == "down" else _GREY)
-    border = "─" * 60
+    if result.veto_killed:
+        border_color = _YELLOW    # amber = vetoed
+    elif result.direction == "up":
+        border_color = _GREEN
+    elif result.direction == "down":
+        border_color = _RED
+    else:
+        border_color = _GREY
 
+    border = "─" * 64
     print()
     print(_c(border, border_color))
 
-    direction_color = _GREEN if result.direction == "up" else _RED
+    direction_color = _GREEN if result.direction == "up" else (_RED if result.direction == "down" else _YELLOW)
     print(_c(f"  {result.emoji}  {result.direction_label}", direction_color + _BOLD) +
           _c(f"  ·  {result.ticker}  ·  {result.timeframe}", _BOLD))
 
@@ -75,24 +82,35 @@ def print_result(result: TrendResult, verbose: bool = None):
           _c(f"Confidence: {result.confidence:.0%}", _YELLOW) +
           _c(f"  Candles: {result.candles_analyzed}", _GREY))
 
+    if result.veto_killed:
+        print(_c(f"  ⚡ VETOED by: {', '.join(result.vetoes_failed)}", _YELLOW + _BOLD))
+
     if verbose and result.signals:
-        print(_c("  Signals:", _BLUE))
+        print(_c("  Core Signals:", _BLUE))
         for sig in result.signals:
             icon = "✓" if sig.passed else "✗"
-            col = _GREEN if sig.passed else _GREY
-            detail_str = "  ".join(f"{k}={v}" for k, v in sig.detail.items())
-            print(
-                _c(f"    {icon} {sig.name:<32}", col) +
-                _c(f"score={sig.score:.0%}  {detail_str}", _GREY)
-            )
+            col  = _GREEN if sig.passed else _GREY
+            det  = "  ".join(f"{k}={v}" for k, v in list(sig.detail.items())[:3])
+            print(_c(f"    {icon} {sig.name:<28}", col) +
+                  _c(f"score={sig.score:.0%}  {det}", _GREY))
+
+    if verbose and result.vetoes:
+        print(_c("  Veto Gates:", _MAGENTA))
+        for v in result.vetoes:
+            icon = "✓" if v.passed else "✗"
+            col  = _GREEN if v.passed else _YELLOW
+            det  = "  ".join(f"{k}={val}" for k, val in list(v.detail.items())[:2])
+            print(_c(f"    {icon} {v.name:<28}", col) +
+                  _c(f"{det}", _GREY))
 
     if result.vlm_verdict:
         vlm_col = _GREEN if "uptrend" in result.vlm_verdict else _RED
         print(_c(f"  🤖 VLM ({CFG.vlm.model}): {result.vlm_verdict}", vlm_col) +
               (f"  conf={result.vlm_confidence:.0%}" if result.vlm_confidence else ""))
 
-    if result.chart_1h_path:
-        print(_c(f"  📊 Chart: {result.chart_1h_path}", _CYAN))
+    chart_path = result.chart_1h_path or result.chart_1m_path
+    if chart_path:
+        print(_c(f"  📊 Chart: {chart_path}", _CYAN))
 
     print(_c(border, border_color))
     print()
@@ -126,12 +144,20 @@ def print_scan_summary(results: List[TrendResult]):
     print(_c(f"  🔻 Downtrends : {len(downtrends)}", _RED))
     print(_c(f"  ➡️  No trend   : {len(no_trends)}", _GREY))
 
+    vetoed = [r for r in results if r.veto_killed]
+    print(_c(f"  ⚡ Veto-killed  : {len(vetoed)}", _YELLOW))
+
     if uptrends or downtrends:
         print(_c("\n  DETECTED TRENDS:", _BOLD))
-        for r in uptrends + downtrends:
-            print(_c(f"    {r.emoji} {r.ticker:<12} {r.timeframe:<4}  {r.direction_label:<10}  [{r.score}/5]", _BOLD))
+        for r in sorted(uptrends + downtrends, key=lambda x: x.score, reverse=True):
+            print(_c(f"    {r.emoji} {r.ticker:<12} {r.timeframe:<4}  {r.direction_label:<10}  [{r.score}/5  conf={r.confidence:.0%}]", _BOLD))
 
-    print(_c("─" * 60, _GREY))
+    if vetoed:
+        print(_c("\n  VETO-KILLED (core signals passed but market was not clean):", _YELLOW))
+        for r in vetoed:
+            print(_c(f"    ⚡ {r.ticker:<12} {r.timeframe:<4}  [{', '.join(r.vetoes_failed)}]", _YELLOW))
+
+    print(_c("─" * 64, _GREY))
     print()
 
 

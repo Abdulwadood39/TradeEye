@@ -81,10 +81,10 @@ def run_scan(
             # 3. Generate chart (always — useful for visual review)
             chart_path = generate_chart(df, result, timeframe=tf)
             if chart_path:
-                if tf in ("1h", "2h", "4h"):
-                    result.chart_1h_path = chart_path
+                if tf == "1m":
+                    result.chart_1m_path = chart_path
                 else:
-                    result.chart_1d_path = chart_path
+                    result.chart_1h_path = chart_path
 
             # 4. Optional VLM verification (only if trend detected + score threshold met)
             if (

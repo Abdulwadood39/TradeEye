@@ -6,4 +6,4 @@ live_scan_output
 new
 uptrend
 .claude
-trend_scanner/output/*
+# trend_scanner/output/*
