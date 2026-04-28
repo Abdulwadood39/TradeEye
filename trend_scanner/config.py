@@ -49,7 +49,7 @@ YFINANCE_TO_CCXT: Dict[str, str] = {
 @dataclass
 class DataConfig:
     # How many candles to analyse per timeframe
-    n_candles: int = 2000
+    n_candles: int = 3000
 
     # Timeframes to scan (yfinance interval strings)
     timeframes: List[str] = field(default_factory=lambda: ["1h", "1m"])
@@ -77,7 +77,7 @@ class DataConfig:
 class TrendConfig:
     # === Signal 1: Linear Regression Slope ===
     # Minimum normalised slope (basis points per candle) to count as trending
-    slope_min_bps: float = 0.3
+    slope_min_bps: float = 0.15
 
     # === Signal 2: Mann-Kendall Test ===
     mk_alpha: float = 0.05          # significance level
@@ -90,18 +90,20 @@ class TrendConfig:
     # Pivot detection order (bars each side)
     pivot_order: int = 5
     # Minimum fraction of pivots that must show HH+HL (or LH+LL) structure
-    hh_hl_min_ratio: float = 0.60
+    hh_hl_min_ratio: float = 0.50
 
     # === Signal 5: Pivot Regression Channel ===
     # Both high-pivot and low-pivot regression lines must slope same direction
-    channel_slope_min_bps: float = 0.1   # normalized, same as slope_min_bps
+    channel_slope_min_bps: float = 0.15   # normalized, same as slope_min_bps
 
     # === Scoring ===
     # Minimum signals that must pass to declare a trend (out of 5)
     min_signals_for_trend: int = 3
 
     # Candle window to run signals over (use last N candles of fetched data)
-    analysis_window: int = 2000
+    analysis_window_1h: int = 2500    # 21 trading days
+    analysis_window_1m: int = 2500    # ~3.5 intraday hours
+    analysis_window: int = 3000      # Fallback
 
 
 # ─────────────────────────────────────────────────────────────────────────────

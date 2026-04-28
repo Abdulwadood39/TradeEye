@@ -20,6 +20,9 @@ from trend_scanner.engine.signals import (
     signal_adx,
     signal_market_structure,
     signal_pivot_channel,
+    veto_r2_linearity,
+    veto_atr_consolidation,
+    veto_trend_break,
 )
 
 
@@ -41,6 +44,8 @@ class TrendResult:
     vlm_confidence:   Optional[float] = None
     chart_1h_path:    Optional[str] = None
     chart_1d_path:    Optional[str] = None
+    chart_1m_path:    Optional[str] = None
+    veto_killed:      bool = False
 
     @property
     def is_trending(self) -> bool:
@@ -134,7 +139,9 @@ class TrendEngine:
             )
 
         # Slice to analysis window
-        window = min(self.cfg.analysis_window, len(df))
+        window_map = {"1m": self.cfg.analysis_window_1m, "1h": self.cfg.analysis_window_1h}
+        window = window_map.get(timeframe, self.cfg.analysis_window)
+        window = min(window, len(df))
         analysis_df = df.iloc[-window:].reset_index(drop=True)
 
         # Run all 5 signals
@@ -149,26 +156,42 @@ class TrendEngine:
         # Determine overall direction by majority vote among PASSING signals
         up_votes   = sum(1 for s in all_signals if s.passed and s.direction == "up")
         down_votes = sum(1 for s in all_signals if s.passed and s.direction == "down")
-        total_pass = sum(1 for s in all_signals if s.passed)
 
         if up_votes > down_votes and up_votes >= self.cfg.min_signals_for_trend:
-            direction = "up"
+            initial_direction = "up"
         elif down_votes > up_votes and down_votes >= self.cfg.min_signals_for_trend:
-            direction = "down"
+            initial_direction = "down"
         else:
-            direction = "none"
+            initial_direction = "none"
 
-        # Score = number of signals that agree with final direction
+        direction = initial_direction
+        veto_killed = False
+
         if direction != "none":
+            # Run Veto Gates
+            vetoes: List[SignalResult] = [
+                veto_r2_linearity(analysis_df),
+                veto_atr_consolidation(analysis_df),
+                veto_trend_break(analysis_df, direction)
+            ]
+            all_signals.extend(vetoes)
+            
+            for veto in vetoes:
+                if not veto.passed:
+                    direction = "none"
+                    veto_killed = True
+
+        # Score = number of signals that agree with initial direction (excluding vetoes)
+        if initial_direction != "none":
             score = sum(
                 1 for s in all_signals
-                if s.passed and s.direction == direction
+                if s.passed and s.direction == initial_direction and not getattr(s, "is_veto", False)
             )
         else:
-            score = 0
+            score = sum(1 for s in all_signals if s.passed and not getattr(s, "is_veto", False))
 
-        # Confidence = mean score of passing signals
-        passing = [s for s in all_signals if s.passed and s.direction == direction]
+        # Confidence = mean score of passing signals (excluding vetoes)
+        passing = [s for s in all_signals if s.passed and s.direction == initial_direction and not getattr(s, "is_veto", False)]
         confidence = float(sum(s.score for s in passing) / len(passing)) if passing else 0.0
 
         signals_passed = [s.name for s in passing]
@@ -182,4 +205,5 @@ class TrendEngine:
             signals=all_signals,
             signals_passed=signals_passed,
             candles_analyzed=window,
+            veto_killed=veto_killed,
         )

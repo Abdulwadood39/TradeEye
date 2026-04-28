@@ -61,8 +61,8 @@ def generate_chart(
 
     cfg = chart_cfg or CFG.chart
 
-    # Limit to analysis window for chart
-    window = min(CFG.trend.analysis_window, len(df))
+    # Limit to exactly what the engine analyzed
+    window = result.candles_analyzed if result.candles_analyzed > 0 else min(CFG.trend.analysis_window, len(df))
     plot_df = df.iloc[-window:].reset_index(drop=True)
 
     try:
@@ -100,16 +100,27 @@ def _draw_trend_chart(
         ax.grid(True, color=cfg.grid, linewidth=0.35, alpha=0.7, zorder=0)
 
     # ── Build x-axis positions ───────────────────────────────────────────────
-    use_dates = "datetime" in df.columns and pd.api.types.is_datetime64_any_dtype(df["datetime"])
+    xs = np.arange(len(df), dtype=np.float64)
+    use_dates = "datetime" in df.columns
 
     if use_dates:
-        xs = mdates.date2num(df["datetime"].values)
-        ax_main.xaxis.set_major_formatter(mdates.DateFormatter("%b %d\n%H:%M"))
-        ax_main.xaxis.set_major_locator(mdates.AutoDateLocator())
-        ax_vol.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-        ax_vol.xaxis.set_major_locator(mdates.AutoDateLocator())
-    else:
-        xs = np.arange(len(df), dtype=np.float64)
+        # Create a mapping from index to datetime string
+        dt_values = pd.to_datetime(df["datetime"].values)
+        
+        def format_date(x, pos):
+            idx = int(np.clip(round(x), 0, len(df) - 1))
+            return dt_values[idx].strftime("%b %d\n%H:%M")
+            
+        def format_date_vol(x, pos):
+            idx = int(np.clip(round(x), 0, len(df) - 1))
+            return dt_values[idx].strftime("%b %d")
+
+        ax_main.xaxis.set_major_formatter(plt.FuncFormatter(format_date))
+        ax_vol.xaxis.set_major_formatter(plt.FuncFormatter(format_date_vol))
+        
+        num_ticks = min(8, len(df))
+        ax_main.xaxis.set_major_locator(plt.MaxNLocator(num_ticks))
+        ax_vol.xaxis.set_major_locator(plt.MaxNLocator(num_ticks))
 
     # ── Draw candlesticks ────────────────────────────────────────────────────
     _draw_candles(ax_main, df, xs, cfg)
@@ -169,34 +180,40 @@ def _draw_trend_chart(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _draw_candles(ax, df: pd.DataFrame, xs: np.ndarray, cfg: ChartConfig):
-    """Draw candlestick wicks and bodies."""
+    """Draw candlestick wicks and bodies (vectorized)."""
     n = len(df)
     if n < 2:
         return
 
-    width = (xs[-1] - xs[0]) / n * 0.75
+    from matplotlib.collections import LineCollection, PolyCollection
+
+    width = 0.75
 
     opens  = df["open"].values
     highs  = df["high"].values
     lows   = df["low"].values
     closes = df["close"].values
 
-    for i in range(n):
-        x = xs[i]
-        o, h, l, c = opens[i], highs[i], lows[i], closes[i]
-        color = cfg.bull if c >= o else cfg.bear
+    colors = [cfg.bull if c >= o else cfg.bear for o, c in zip(opens, closes)]
 
-        # Wick
-        ax.plot([x, x], [l, h], color=color, linewidth=0.5, zorder=2)
+    # Wicks (lines)
+    wicks = [((x, l), (x, h)) for x, l, h in zip(xs, lows, highs)]
+    wick_col = LineCollection(wicks, colors=colors, linewidths=0.5, zorder=2)
+    ax.add_collection(wick_col)
 
-        # Body
+    # Bodies (rectangles)
+    bodies = []
+    for x, o, c, h, l in zip(xs, opens, closes, highs, lows):
         body_bot = min(o, c)
-        body_h   = max(abs(c - o), (h - l) * 0.005)
-        rect = plt.Rectangle(
-            (x - width / 2, body_bot), width, body_h,
-            facecolor=color, edgecolor="none", linewidth=0, zorder=3,
-        )
-        ax.add_patch(rect)
+        body_h = max(abs(c - o), (h - l) * 0.005)
+        # Rectangle coordinates: (left, bottom), (right, bottom), (right, top), (left, top)
+        left = x - width / 2
+        right = x + width / 2
+        top = body_bot + body_h
+        bodies.append(((left, body_bot), (right, body_bot), (right, top), (left, top)))
+        
+    body_col = PolyCollection(bodies, facecolors=colors, edgecolors="none", zorder=3)
+    ax.add_collection(body_col)
 
 
 def _draw_volume(ax, df: pd.DataFrame, xs: np.ndarray, cfg: ChartConfig):

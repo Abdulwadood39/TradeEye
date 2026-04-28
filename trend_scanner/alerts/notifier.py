@@ -50,8 +50,8 @@ def print_result(result: TrendResult, verbose: bool = None):
     verbose = verbose if verbose is not None else CFG.alerts.verbose
     is_trend = result.is_trending
 
-    if not is_trend and not CFG.alerts.print_all:
-        # One-liner for no-trend results
+    if not is_trend and not getattr(result, "veto_killed", False) and not CFG.alerts.print_all:
+        # One-liner for clean no-trend (not veto-killed)
         print(
             _c(f"  ➡️  {result.ticker:<12} {result.timeframe:<4}", _GREY) +
             _c(f"  NO TREND  ", _GREY) +
@@ -60,14 +60,21 @@ def print_result(result: TrendResult, verbose: bool = None):
         return
 
     # ── Full alert box ───────────────────────────────────────────────────────
-    border_color = _GREEN if result.direction == "up" else (_RED if result.direction == "down" else _GREY)
+    if getattr(result, "veto_killed", False):
+        direction_label = "VETOED (FALSE POSITIVE)"
+        border_color = _RED
+        direction_color = _RED
+    else:
+        direction_label = result.direction_label
+        border_color = _GREEN if result.direction == "up" else (_RED if result.direction == "down" else _GREY)
+        direction_color = _GREEN if result.direction == "up" else _RED
+
     border = "─" * 60
 
     print()
     print(_c(border, border_color))
 
-    direction_color = _GREEN if result.direction == "up" else _RED
-    print(_c(f"  {result.emoji}  {result.direction_label}", direction_color + _BOLD) +
+    print(_c(f"  {result.emoji}  {direction_label}", direction_color + _BOLD) +
           _c(f"  ·  {result.ticker}  ·  {result.timeframe}", _BOLD))
 
     score_bar = "█" * result.score + "░" * (5 - result.score)
@@ -78,13 +85,23 @@ def print_result(result: TrendResult, verbose: bool = None):
     if verbose and result.signals:
         print(_c("  Signals:", _BLUE))
         for sig in result.signals:
-            icon = "✓" if sig.passed else "✗"
-            col = _GREEN if sig.passed else _GREY
-            detail_str = "  ".join(f"{k}={v}" for k, v in sig.detail.items())
-            print(
-                _c(f"    {icon} {sig.name:<32}", col) +
-                _c(f"score={sig.score:.0%}  {detail_str}", _GREY)
-            )
+            if getattr(sig, "is_veto", False):
+                icon = "✓" if sig.passed else "🛑"
+                col = _GREY if sig.passed else _RED
+                status = "PASS" if sig.passed else "VETO FAILED"
+                detail_str = "  ".join(f"{k}={v}" for k, v in sig.detail.items())
+                print(
+                    _c(f"    {icon} {sig.name:<32}", col) +
+                    _c(f"[{status}]  {detail_str}", col)
+                )
+            else:
+                icon = "✓" if sig.passed else "✗"
+                col = _GREEN if sig.passed else _GREY
+                detail_str = "  ".join(f"{k}={v}" for k, v in sig.detail.items())
+                print(
+                    _c(f"    {icon} {sig.name:<32}", col) +
+                    _c(f"score={sig.score:.0%}  {detail_str}", _GREY)
+                )
 
     if result.vlm_verdict:
         vlm_col = _GREEN if "uptrend" in result.vlm_verdict else _RED
@@ -107,7 +124,16 @@ def print_scan_header(tickers: List[str], timeframes: List[str], n_candles: int)
     print(_c(f"  {now}", _GREY))
     print(_c(f"  Tickers:    {', '.join(tickers)}", _BLUE))
     print(_c(f"  Timeframes: {', '.join(timeframes)}", _BLUE))
-    print(_c(f"  Candles:    {n_candles} per timeframe", _BLUE))
+    print(_c(f"  Data Fetch: {n_candles} candles maximum per timeframe", _BLUE))
+    
+    cfg = CFG.trend
+    analysis_strs = []
+    if "1m" in timeframes: analysis_strs.append(f"1m={cfg.analysis_window_1m}")
+    if "1h" in timeframes: analysis_strs.append(f"1h={cfg.analysis_window_1h}")
+    other_tfs = [t for t in timeframes if t not in ("1m", "1h")]
+    if other_tfs: analysis_strs.append(f"others={cfg.analysis_window}")
+    
+    print(_c(f"  Analysis:   {', '.join(analysis_strs)} candles per scan", _YELLOW))
     print(_c("═" * 60, _CYAN))
     print()
 
@@ -116,7 +142,8 @@ def print_scan_summary(results: List[TrendResult]):
     """Print an end-of-scan summary."""
     uptrends   = [r for r in results if r.direction == "up"]
     downtrends = [r for r in results if r.direction == "down"]
-    no_trends  = [r for r in results if r.direction == "none"]
+    vetoed     = [r for r in results if getattr(r, "veto_killed", False)]
+    no_trends  = [r for r in results if r.direction == "none" and not getattr(r, "veto_killed", False)]
 
     print()
     print(_c("─" * 60, _GREY))
@@ -124,6 +151,7 @@ def print_scan_summary(results: List[TrendResult]):
     print(_c(f"  Total scanned : {len(results)}", _GREY))
     print(_c(f"  🚀 Uptrends   : {len(uptrends)}", _GREEN))
     print(_c(f"  🔻 Downtrends : {len(downtrends)}", _RED))
+    print(_c(f"  🛑 Vetoed     : {len(vetoed)} (false positives killed)", _YELLOW))
     print(_c(f"  ➡️  No trend   : {len(no_trends)}", _GREY))
 
     if uptrends or downtrends:

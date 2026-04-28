@@ -29,6 +29,7 @@ class SignalResult:
     direction: str          # 'up' | 'down' | 'none'
     score: float            # 0.0 – 1.0
     detail: Dict[str, Any] = field(default_factory=dict)
+    is_veto: bool = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -76,6 +77,11 @@ def signal_mann_kendall(df: pd.DataFrame) -> SignalResult:
     """
     close = df["close"].values.astype(np.float64)
 
+    if len(close) > 300:
+        # Subsample to 150 evenly spaced points to avoid over-powered p-values
+        idx = np.linspace(0, len(close) - 1, 150, dtype=int)
+        close = close[idx]
+
     try:
         import pymannkendall as mk
         result = mk.original_test(close)
@@ -96,7 +102,8 @@ def signal_mann_kendall(df: pd.DataFrame) -> SignalResult:
         elif "decreasing" in trend_str or (isinstance(trend_str, str) and trend_str == "down"):
             direction = "down"
 
-    passed = is_significant and direction != "none"
+    TAU_MIN = 0.25
+    passed = is_significant and direction != "none" and abs(float(tau)) >= TAU_MIN
 
     # Score based on how far below alpha the p-value is (stronger = lower p)
     score = min(1.0 - p_value, 1.0) if is_significant else 0.0
@@ -341,3 +348,62 @@ def signal_pivot_channel(df: pd.DataFrame) -> SignalResult:
             "lo_channel_bps": round(lo_slope, 4),
         },
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VETO GATES
+# ─────────────────────────────────────────────────────────────────────────────
+
+def veto_r2_linearity(df: pd.DataFrame, min_r2: float = 0.55) -> SignalResult:
+    close = df["close"].values
+    x = np.arange(len(close), dtype=np.float64)
+    slope, intercept = np.polyfit(x, close, 1)
+    predicted = slope * x + intercept
+    ss_res = np.sum((close - predicted) ** 2)
+    ss_tot = np.sum((close - np.mean(close)) ** 2)
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    passed = r2 >= min_r2
+    return SignalResult(name="R² Linearity", passed=passed, direction="none", 
+                        score=r2, detail={"r2": round(r2, 4)}, is_veto=True)
+
+def _compute_atr(df: pd.DataFrame, period: int = 14) -> float:
+    high = df["high"].values
+    low = df["low"].values
+    close = df["close"].values
+    n = len(high)
+    if n < period + 1:
+        return 0.0
+    tr = np.zeros(n)
+    for i in range(1, n):
+        hl = high[i] - low[i]
+        hpc = abs(high[i] - close[i - 1])
+        lpc = abs(low[i] - close[i - 1])
+        tr[i] = max(hl, hpc, lpc)
+    return float(np.mean(tr[-period:]))
+
+def veto_atr_consolidation(df: pd.DataFrame, period: int = 14, window: int = 250) -> SignalResult:
+    recent_df = df.iloc[-window:] if len(df) > window else df
+    atr = _compute_atr(recent_df, period)
+    close = recent_df["close"].values
+    net_move = abs(close[-1] - close[0])
+    total_atr = atr * len(recent_df)  # sum of all ATR bars (approx)
+    efficiency_ratio = net_move / total_atr if total_atr > 0 else 0.0
+    passed = efficiency_ratio >= 0.02
+    return SignalResult(name="ATR Efficiency", passed=passed, direction="none",
+                        score=efficiency_ratio, detail={"efficiency_ratio": round(efficiency_ratio, 4)},
+                        is_veto=True)
+
+def veto_trend_break(df: pd.DataFrame, direction: str, lookback: int = 50) -> SignalResult:
+    recent = df.iloc[-lookback:]
+    pivot_hi, pivot_lo = get_pivots(recent, order=3)
+    passed = True
+    if direction == "up" and len(pivot_lo) >= 2:
+        lo_prices = recent["low"].values[pivot_lo]
+        if lo_prices[-1] < lo_prices[-2]:
+            passed = False
+    elif direction == "down" and len(pivot_hi) >= 2:
+        hi_prices = recent["high"].values[pivot_hi]
+        if hi_prices[-1] > hi_prices[-2]:
+            passed = False
+    return SignalResult(name="Trend Break", passed=passed, direction="none",
+                        score=1.0 if passed else 0.0, detail={}, is_veto=True)
