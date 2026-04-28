@@ -164,7 +164,7 @@ def check_vlm_available(model: str = None) -> bool:
     try:
         import ollama
         models = ollama.list()
-        names = [m.get("name", "") for m in models.get("models", [])]
+        names = [m.get("model", "") for m in models.get("models", [])]
         return any(model in n for n in names)
     except Exception:
         return False

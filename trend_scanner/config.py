@@ -52,7 +52,7 @@ class DataConfig:
     n_candles: int = 2000
 
     # Timeframes to scan (yfinance interval strings)
-    timeframes: List[str] = field(default_factory=lambda: ["1h", "1d"])
+    timeframes: List[str] = field(default_factory=lambda: ["1h", "1m"])
 
     # yfinance fetch periods
     period_1h: str = "2y"      # max supported by Yahoo Finance
@@ -142,7 +142,7 @@ class ChartConfig:
 @dataclass
 class VLMConfig:
     enabled: bool = False
-    model: str = "qwen2.5vl:7b"
+    model: str = "qwen3.5:4b"
     timeout: int = 120       # seconds to wait for Ollama response
     # Only run VLM when math score >= this (avoid wasting time on weak signals)
     min_score_to_verify: int = 3
