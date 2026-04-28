@@ -12,6 +12,43 @@ from typing import List, Dict
 # DEFAULT TICKER LISTS — override at runtime via CLI --tickers
 # ─────────────────────────────────────────────────────────────────────────────
 
+FOREX_TICKERS: List[str] = [
+    # Majors
+    "EURUSD=X", "USDJPY=X", "GBPUSD=X", "USDCHF=X", "USDCAD=X", "AUDUSD=X", "NZDUSD=X",
+    # EUR Crosses
+    "EURGBP=X", "EURJPY=X", "EURCHF=X", "EURCAD=X", "EURAUD=X", "EURNZD=X",
+    # GBP Crosses
+    "GBPJPY=X", "GBPCHF=X", "GBPCAD=X", "GBPAUD=X", "GBPNZD=X",
+    # AUD Crosses
+    "AUDJPY=X", "AUDCHF=X", "AUDCAD=X", "AUDNZD=X",
+    # NZD Crosses
+    "NZDJPY=X", "NZDCHF=X", "NZDCAD=X",
+    # CAD & CHF Crosses
+    "CADJPY=X", "CADCHF=X", "CHFJPY=X",
+    # Minor/Exotic USD Crosses
+    "USDMXN=X", "USDZAR=X", "USDTRY=X", "USDSEK=X", "USDNOK=X", "USDDKK=X",
+    "USDSGD=X", "USDHKD=X", "USDCNH=X", "USDPLN=X", "USDHUF=X", "USDCZK=X",
+    "USDINR=X", "USDTHB=X", "USDKRW=X", "USDTWD=X", "USDIDR=X", "USDMYR=X",
+    "USDPHP=X", "USDCLP=X", "USDCOP=X", "USDBRL=X", "USDPEN=X", "USDARS=X",
+    "USDILS=X",
+    # Minor/Exotic EUR Crosses
+    "EURMXN=X", "EURZAR=X", "EURTRY=X", "EURSEK=X", "EURNOK=X", "EURDKK=X",
+    "EURPLN=X", "EURHUF=X", "EURCZK=X", "EURSGD=X", "EURHKD=X", "EURILS=X",
+    # Minor/Exotic GBP Crosses
+    "GBPSEK=X", "GBPNOK=X", "GBPDKK=X", "GBPZAR=X", "GBPSGD=X", "GBPHKD=X",
+    "GBPTRY=X", "GBPPLN=X",
+    # Minor/Exotic AUD & NZD Crosses
+    "AUDSGD=X", "AUDHKD=X", "NZDSGD=X",
+    # Minor/Exotic CAD & CHF Crosses
+    "CADSGD=X", "CADHKD=X", "CHFSGD=X", "CHFHKD=X", "CHFPLN=X", "CHFZAR=X",
+    # Additional Asian/Emerging Crosses
+    "SGDJPY=X", "HKDJPY=X", "ZARJPY=X", "MXNJPY=X", "TRYJPY=X", "SEKJPY=X",
+    "NOKJPY=X", "PLNJPY=X", "SGDHKD=X",
+    # CNH and INR Crosses
+    "EURCNH=X", "GBPCNH=X", "AUDCNH=X", "NZDCNH=X", "CADCNH=X", "CHFCNH=X",
+    "EURINR=X", "GBPINR=X", "AUDINR=X", "JPYINR=X"
+]
+
 DEFAULT_TICKERS: List[str] = [
     # Stocks
     "AAPL", "NVDA", "TSLA", "MSFT",
@@ -20,7 +57,7 @@ DEFAULT_TICKERS: List[str] = [
     # Commodities
     "GC=F",   # Gold
     "CL=F",   # Crude Oil
-]
+] + FOREX_TICKERS
 
 # Map yfinance-style crypto tickers → CCXT symbol (BTC-USD → BTC/USDT)
 YFINANCE_TO_CCXT: Dict[str, str] = {
