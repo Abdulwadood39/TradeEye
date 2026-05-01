@@ -210,9 +210,11 @@ class VLMConfig:
 class AlertConfig:
     log_dir: str = "trend_scanner/output/logs"
     log_file: str = "trend_log.csv"
-    # Print all results or only trends
+    # Print all results (including no-trend one-liners) — off by default (server-friendly)
     print_all: bool = False
     verbose: bool = True
+    # Save charts for ALL tickers, not just trending ones — off by default (debug/dev mode)
+    save_all_charts: bool = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────

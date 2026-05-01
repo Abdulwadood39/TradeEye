@@ -1,30 +1,25 @@
 """
 main.py — iTrade Agentic Trend Scanner — CLI entry point.
 
-Usage examples:
-  # Scan default tickers
-  python -m trend_scanner.main
+Default mode: continuous dual-loop, fully parallelised per ticker.
+  • 1h loop  – all tickers on 1h timeframe, every 24h (configurable)
+  • 1m loop  – all tickers on 1m timeframe, every 3h (configurable)
+Both loops start immediately and run concurrently until Ctrl+C.
 
-  # Scan specific tickers (auto-detects crypto vs stock)
-  python -m trend_scanner.main --tickers AAPL BTC-USD ETH-USD GC=F NVDA
-
-  # Custom candle count and timeframes
-  python -m trend_scanner.main --tickers TSLA --candles 3000 --timeframes 1h 1d
-
-  # Enable Qwen2.5-VL visual verification
-  python -m trend_scanner.main --tickers BTC-USD --vlm
-
-  # Continuous watch mode (re-scan every 60 minutes)
-  python -m trend_scanner.main --tickers BTC-USD ETH-USD --watch --interval 60
-
-  # Show all results (including no-trend)
-  python -m trend_scanner.main --tickers AAPL --all
+Examples:
+  python -m trend_scanner.main                        # dual-loop, default tickers
+  python -m trend_scanner.main --tickers AAPL BTC-USD # specific tickers
+  python -m trend_scanner.main --workers 30           # more parallelism
+  python -m trend_scanner.main --telegram             # Telegram alerts on
+  python -m trend_scanner.main --once --timeframes 1h # single scan, then exit
 """
 from __future__ import annotations
 
 import argparse
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import List, Optional
 
@@ -35,253 +30,376 @@ from trend_scanner.charts.generator import generate_chart
 from trend_scanner.vlm.qwen_agent import verify_chart, check_vlm_available
 from trend_scanner.alerts.notifier import (
     print_result,
-    print_scan_header,
     print_scan_summary,
     log_all,
 )
-from trend_scanner.alerts.dispatcher import dispatch_trend_alert
+from trend_scanner.alerts.dispatcher import dispatch_trend_alert, DISPATCHER
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SCAN LOGIC
+# THREAD SAFETY
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_scan(
-    tickers: List[str],
-    timeframes: List[str],
+_print_lock = threading.Lock()
+_csv_lock   = threading.Lock()
+
+
+def _locked_print(*args, **kwargs):
+    with _print_lock:
+        print(*args, **kwargs)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PER-TICKER WORKER  (one thread per ticker)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _scan_one(
+    ticker: str,
+    timeframe: str,
     n_candles: int,
+    vlm_enabled: bool,
+    verbose: bool,
+    save_all_charts: bool = False,
+) -> Optional[TrendResult]:
+    """
+    Fetch + analyse one ticker/timeframe combination.
+    Each call creates its own TrendEngine so threads don't share state.
+    Returns TrendResult, or None when data is unavailable.
+    """
+    engine = TrendEngine()
+
+    df = fetch(ticker, timeframe, n_candles)
+    if df is None or len(df) < 50:
+        return None
+
+    result = engine.analyze(df, ticker=ticker, timeframe=timeframe)
+
+    # Save chart only for trending tickers by default.
+    # --save-all-charts enables saving for every ticker (dev/debug mode).
+    chart_path = None
+    if result.is_trending or save_all_charts:
+        chart_path = generate_chart(df, result, timeframe=timeframe)
+    if chart_path:
+        if timeframe in ("1h", "2h", "4h"):
+            result.chart_1h_path = chart_path
+        else:
+            result.chart_1d_path = chart_path
+
+    if (
+        vlm_enabled
+        and result.is_trending
+        and result.score >= CFG.vlm.min_score_to_verify
+        and chart_path
+    ):
+        verdict, conf, _ = verify_chart(chart_path)
+        result.vlm_verdict    = verdict
+        result.vlm_confidence = conf
+
+    # Print entire result block atomically so concurrent workers don't interleave
+    with _print_lock:
+        print_result(result, verbose=verbose)
+
+    dispatch_trend_alert(result)
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PARALLEL SCAN  (one call = all tickers for one timeframe)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_parallel_scan(
+    tickers: List[str],
+    timeframe: str,
+    n_candles: int,
+    workers: int = 20,
     vlm_enabled: bool = False,
     print_all: bool = False,
     verbose: bool = True,
+    save_all_charts: bool = False,
+    scan_label: str = "SCAN",
 ) -> List[TrendResult]:
     """
-    Run one full scan pass across all tickers and timeframes.
-
-    Returns
-    -------
-    List[TrendResult] — one per (ticker, timeframe) pair
+    Submit all tickers to the thread pool and collect results.
+    Returns a list of TrendResult (data-failure tickers are excluded).
     """
-    print_scan_header(tickers, timeframes, n_candles)
+    CFG.alerts.print_all = print_all
+    CFG.alerts.save_all_charts = save_all_charts
 
-    engine = TrendEngine()
-    all_results: List[TrendResult] = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _print_lock:
+        print(f"\n{'═' * 60}")
+        print(f"  {scan_label}  [{timeframe.upper()}]  {now}")
+        print(f"  {len(tickers)} tickers  ·  {workers} workers  ·  {n_candles} candles")
+        print(f"{'═' * 60}")
 
-    for ticker in tickers:
-        for tf in timeframes:
-            print(f"  Fetching {ticker} [{tf}] ...")
+    results: List[TrendResult] = []
 
-            # 1. Fetch data
-            df = fetch(ticker, tf, n_candles)
-            if df is None or len(df) < 50:
-                print(f"  [SKIP] {ticker} {tf}: insufficient data\n")
-                continue
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(_scan_one, ticker, timeframe, n_candles, vlm_enabled, verbose, save_all_charts): ticker
+            for ticker in tickers
+        }
+        for fut in as_completed(futures):
+            ticker = futures[fut]
+            try:
+                result = fut.result()
+                if result is not None:
+                    results.append(result)
+            except Exception as exc:
+                _locked_print(f"  [ERR] {ticker} [{timeframe}]: {exc}")
 
-            # 2. Trend analysis
-            result = engine.analyze(df, ticker=ticker, timeframe=tf)
+    # with _print_lock:
+    #     print_scan_summary(results)
 
-            # 3. Generate chart (always — useful for visual review)
-            chart_path = generate_chart(df, result, timeframe=tf)
-            if chart_path:
-                if tf in ("1h", "2h", "4h"):
-                    result.chart_1h_path = chart_path
-                else:
-                    result.chart_1d_path = chart_path
+    with _csv_lock:
+        log_all(results)
 
-            # 4. Optional VLM verification (only if trend detected + score threshold met)
-            if (
-                vlm_enabled
-                and result.is_trending
-                and result.score >= CFG.vlm.min_score_to_verify
-                and chart_path
-            ):
-                print(f"  🤖 Running VLM verification on {ticker} {tf} chart...")
-                verdict, conf, reasoning = verify_chart(chart_path)
-                result.vlm_verdict    = verdict
-                result.vlm_confidence = conf
-                if reasoning:
-                    print(f"     VLM: {reasoning}")
-
-            # 5. Print result
-            CFG.alerts.print_all = print_all
-            print_result(result, verbose=verbose)
-
-            # 6. Dispatch external alerts
-            dispatch_trend_alert(result)
-
-            all_results.append(result)
-
-    # Summary + CSV log
-    print_scan_summary(all_results)
-    log_all(all_results)
-    _print_log_path()
-
-    return all_results
+    return results
 
 
-def _print_log_path():
-    import os
-    log_path = os.path.join(CFG.alerts.log_dir, CFG.alerts.log_file)
-    print(f"  💾 Log saved: {os.path.abspath(log_path)}")
-    print(f"  📂 Charts:    {os.path.abspath(CFG.chart.output_dir)}\n")
+# ─────────────────────────────────────────────────────────────────────────────
+# LOOP RUNNER  (one thread per timeframe)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _scan_loop(
+    timeframe: str,
+    interval_sec: int,
+    tickers: List[str],
+    n_candles: int,
+    workers: int,
+    vlm_enabled: bool,
+    print_all: bool,
+    verbose: bool,
+    save_all_charts: bool,
+    stop_event: threading.Event,
+):
+    """
+    Repeatedly run parallel scans for `timeframe` every `interval_sec` seconds.
+    Returns when `stop_event` is set.
+    """
+    scan_count = 0
+    while not stop_event.is_set():
+        scan_count += 1
+        run_parallel_scan(
+            tickers=tickers,
+            timeframe=timeframe,
+            n_candles=n_candles,
+            workers=workers,
+            vlm_enabled=vlm_enabled,
+            print_all=print_all,
+            verbose=verbose,
+            save_all_charts=save_all_charts,
+            scan_label=f"SCAN #{scan_count}",
+        )
+        # Sleep in 1-second increments so Ctrl+C is responsive
+        for _ in range(interval_sec):
+            if stop_event.is_set():
+                return
+            time.sleep(1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONTINUOUS DUAL-LOOP  (1h + 1m running in parallel threads)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_continuous(
+    tickers: List[str],
+    hourly_interval_sec: int,
+    minutely_interval_sec: int,
+    workers: int,
+    vlm_enabled: bool = False,
+    print_all: bool = False,
+    verbose: bool = True,
+    save_all_charts: bool = False,
+):
+    """
+    Start two background threads — one for hourly 1h scans, one for 1m scans.
+    Blocks until Ctrl+C, then shuts down cleanly.
+    """
+    stop_event = threading.Event()
+
+    hourly_thread = threading.Thread(
+        target=_scan_loop,
+        kwargs=dict(
+            timeframe="1h",
+            interval_sec=hourly_interval_sec,
+            tickers=tickers,
+            n_candles=CFG.trend.analysis_window_1h,
+            workers=workers,
+            vlm_enabled=vlm_enabled,
+            print_all=print_all,
+            verbose=verbose,
+            save_all_charts=save_all_charts,
+            stop_event=stop_event,
+        ),
+        daemon=True,
+        name="scan-1h",
+    )
+    minutely_thread = threading.Thread(
+        target=_scan_loop,
+        kwargs=dict(
+            timeframe="1m",
+            interval_sec=minutely_interval_sec,
+            tickers=tickers,
+            n_candles=CFG.trend.analysis_window_1m,
+            workers=workers,
+            vlm_enabled=vlm_enabled,
+            print_all=print_all,
+            verbose=verbose,
+            save_all_charts=save_all_charts,
+            stop_event=stop_event,
+        ),
+        daemon=True,
+        name="scan-1m",
+    )
+
+    print(f"\n  Continuous dual-loop scanner started.")
+    def _fmt(sec: int) -> str:
+        return f"{sec // 3600}h" if sec >= 3600 else f"{sec // 60}m"
+
+    print(f"  1h scan  — every {_fmt(hourly_interval_sec)},  {len(tickers)} tickers, {workers} workers")
+    print(f"  1m scan  — every {_fmt(minutely_interval_sec)},  {len(tickers)} tickers, {workers} workers")
+    print(f"  Ctrl+C to stop.\n")
+
+    hourly_thread.start()
+    minutely_thread.start()
+
+    try:
+        while hourly_thread.is_alive() or minutely_thread.is_alive():
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\n\n  Stopping — waiting for current scans to finish (max 30s)...")
+        stop_event.set()
+        hourly_thread.join(timeout=30)
+        minutely_thread.join(timeout=30)
+        print("  Goodbye!\n")
+        sys.exit(0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SINGLE-SHOT SCAN  (--once mode, backwards-compatible)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_once(
+    tickers: List[str],
+    timeframes: List[str],
+    n_candles: int,
+    workers: int,
+    vlm_enabled: bool = False,
+    print_all: bool = False,
+    verbose: bool = True,
+    save_all_charts: bool = False,
+):
+    for tf in timeframes:
+        run_parallel_scan(
+            tickers=tickers,
+            timeframe=tf,
+            n_candles=n_candles,
+            workers=workers,
+            vlm_enabled=vlm_enabled,
+            print_all=print_all,
+            verbose=verbose,
+            save_all_charts=save_all_charts,
+            scan_label="ONE-SHOT SCAN",
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CLI
 # ─────────────────────────────────────────────────────────────────────────────
 
-def parse_args():
-    parser = argparse.ArgumentParser(
+def _parse_args():
+    p = argparse.ArgumentParser(
         prog="trend_scanner",
-        description="iTrade Agentic Trend Scanner — detects sustained up/down trends using 5 mathematical signals",
+        description="iTrade Agentic Trend Scanner — parallel dual-loop (1h + 1m)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-
-    parser.add_argument(
-        "--tickers", "-t",
-        nargs="+",
-        default=None,
-        metavar="TICKER",
-        help="Ticker symbols to scan (e.g. AAPL BTC-USD GC=F). Defaults to config list.",
-    )
-
-    parser.add_argument(
-        "--timeframes", "-tf",
-        nargs="+",
-        default=None,
-        metavar="TF",
-        help="Timeframes to scan (e.g. 1h 1d). Default: 1h 1d",
-    )
-
-    parser.add_argument(
-        "--candles", "-c",
-        type=int,
-        default=None,
-        metavar="N",
-        help=f"Number of candles to analyse. Default: {CFG.data.n_candles}",
-    )
-
-    parser.add_argument(
-        "--vlm",
-        action="store_true",
-        help="Enable Qwen2.5-VL visual verification via local Ollama (slower but adds visual crosscheck)",
-    )
-
-    parser.add_argument(
-        "--telegram",
-        action="store_true",
-        help="Enable Telegram notifications for detected trends",
-    )
-
-    parser.add_argument(
-        "--watch", "-w",
-        action="store_true",
-        help="Continuous watch mode: re-scan on an interval",
-    )
-
-    parser.add_argument(
-        "--interval", "-i",
-        type=int,
-        default=60,
-        metavar="MINUTES",
-        help="Re-scan interval in minutes (only in --watch mode). Default: 60",
-    )
-
-    parser.add_argument(
-        "--min-signals", "-ms",
-        type=int,
-        default=None,
-        metavar="N",
-        help=f"Minimum signals required to declare a trend (1–5). Default: {CFG.trend.min_signals_for_trend}",
-    )
-
-    parser.add_argument(
-        "--candle-window",
-        type=int,
-        default=None,
-        metavar="N",
-        help="Analysis window size in candles. Default matches --candles",
-    )
-
-    parser.add_argument(
-        "--all", "-a",
-        action="store_true",
-        dest="print_all",
-        help="Print all results including no-trend tickers",
-    )
-
-    parser.add_argument(
-        "--quiet", "-q",
-        action="store_true",
-        help="Suppress verbose signal breakdown (only show headline result)",
-    )
-
-    return parser.parse_args()
+    p.add_argument("--tickers", "-t", nargs="+", metavar="TICKER",
+                   help="Ticker symbols to scan. Defaults to config list.")
+    p.add_argument("--workers", "-w", type=int, default=20, metavar="N",
+                   help="Parallel worker threads per scan (default: 20)")
+    p.add_argument("--hourly-interval", type=int, default=1440, metavar="MIN",
+                   help="Minutes between 1h scans (default: 1440 = 24h)")
+    p.add_argument("--minute-interval", type=int, default=180, metavar="MIN",
+                   help="Minutes between 1m scans (default: 180 = 3h)")
+    p.add_argument("--once", action="store_true",
+                   help="Run a single scan pass then exit (use --timeframes to pick TFs)")
+    p.add_argument("--timeframes", "-tf", nargs="+", metavar="TF", default=["1h", "1m"],
+                   help="Timeframes for --once mode (default: 1h 1m)")
+    p.add_argument("--candles", "-c", type=int, default=None, metavar="N",
+                   help="Override candle count (applies to --once mode)")
+    p.add_argument("--vlm", action="store_true",
+                   help="Enable Qwen2.5-VL visual verification (requires local Ollama)")
+    p.add_argument("--telegram", action="store_true",
+                   help="Enable Telegram notifications for detected trends")
+    p.add_argument("--min-signals", type=int, default=None, metavar="N",
+                   help=f"Minimum signals to declare a trend (1-5, default: {CFG.trend.min_signals_for_trend})")
+    p.add_argument("--all", "-a", action="store_true", dest="print_all",
+                   help="Print one-liner for every ticker scanned, not just detected trends")
+    p.add_argument("--quiet", "-q", action="store_true",
+                   help="Suppress per-signal detail, show headline result only")
+    p.add_argument("--save-all-charts", action="store_true", dest="save_all_charts",
+                   help="Save charts for ALL tickers, not just those with a detected trend (dev/debug mode)")
+    return p.parse_args()
 
 
 def main():
-    args = parse_args()
+    args = _parse_args()
 
-    # ── Apply arg overrides to CFG ───────────────────────────────────────────
-    tickers    = [t.upper() for t in args.tickers] if args.tickers else DEFAULT_TICKERS
-    timeframes = args.timeframes or CFG.data.timeframes
-    n_candles  = args.candles or CFG.data.n_candles
+    # ── Apply overrides ──────────────────────────────────────────────────────
+    tickers = [t.upper() for t in args.tickers] if args.tickers else DEFAULT_TICKERS
 
     if args.min_signals:
         CFG.trend.min_signals_for_trend = args.min_signals
-
-    if args.candle_window:
-        CFG.trend.analysis_window = args.candle_window
-    else:
-        CFG.trend.analysis_window = n_candles
-
-    CFG.vlm.enabled = args.vlm
     if args.telegram:
         CFG.notifications.telegram.enabled = True
 
     # ── VLM pre-flight ───────────────────────────────────────────────────────
-    if args.vlm:
-        print(f"\n  Checking VLM availability ({CFG.vlm.model})...")
+    vlm_enabled = args.vlm
+    if vlm_enabled:
+        print(f"\n  Checking VLM ({CFG.vlm.model})...")
         if not check_vlm_available():
-            print(f"  ⚠️  Model {CFG.vlm.model} not found in Ollama.")
-            print(f"     Pull it with: ollama pull {CFG.vlm.model}")
-            print("     Continuing with math-only mode.\n")
-            CFG.vlm.enabled = False
+            print(f"  VLM model {CFG.vlm.model} not found. Pull with: ollama pull {CFG.vlm.model}")
+            print("  Continuing in math-only mode.\n")
+            vlm_enabled = False
         else:
-            print(f"  ✅ VLM ready: {CFG.vlm.model}\n")
+            print(f"  VLM ready: {CFG.vlm.model}\n")
 
-    # ── Run ──────────────────────────────────────────────────────────────────
-    if args.watch:
-        print(f"  👁  Watch mode: scanning every {args.interval} minute(s). Ctrl+C to stop.\n")
-        scan_count = 0
-        try:
-            while True:
-                scan_count += 1
-                print(f"\n{'='*60}")
-                print(f"  SCAN #{scan_count}  —  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                print(f"{'='*60}")
-                run_scan(
-                    tickers=tickers,
-                    timeframes=timeframes,
-                    n_candles=n_candles,
-                    vlm_enabled=CFG.vlm.enabled,
-                    print_all=args.print_all,
-                    verbose=not args.quiet,
-                )
-                print(f"\n  💤 Next scan in {args.interval} minute(s)...")
-                time.sleep(args.interval * 60)
-        except KeyboardInterrupt:
-            print("\n\n  Scan stopped. Goodbye! 👋\n")
-            sys.exit(0)
-    else:
-        run_scan(
+    workers         = args.workers
+    verbose         = not args.quiet
+    print_all       = args.print_all
+    save_all_charts = args.save_all_charts
+
+    # ── One-shot mode ────────────────────────────────────────────────────────
+    if args.once:
+        n_candles = args.candles or CFG.data.n_candles
+        run_once(
             tickers=tickers,
-            timeframes=timeframes,
+            timeframes=args.timeframes,
             n_candles=n_candles,
-            vlm_enabled=CFG.vlm.enabled,
-            print_all=args.print_all,
-            verbose=not args.quiet,
+            workers=workers,
+            vlm_enabled=vlm_enabled,
+            print_all=print_all,
+            verbose=verbose,
+            save_all_charts=save_all_charts,
         )
+        return
+
+    # ── Continuous dual-loop (default) ───────────────────────────────────────
+    hourly_interval_sec   = args.hourly_interval * 60
+    minutely_interval_sec = args.minute_interval * 60  # arg is in minutes for consistency
+
+    run_continuous(
+        tickers=tickers,
+        hourly_interval_sec=hourly_interval_sec,
+        minutely_interval_sec=minutely_interval_sec,
+        workers=workers,
+        vlm_enabled=vlm_enabled,
+        print_all=print_all,
+        verbose=verbose,
+        save_all_charts=save_all_charts,
+    )
 
 
 if __name__ == "__main__":

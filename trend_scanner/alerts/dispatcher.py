@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import logging
 import requests
+import time
 from abc import ABC, abstractmethod
-from typing import List
+from typing import Dict, List, Tuple
 
 from trend_scanner.config import CFG
 from trend_scanner.engine.trend_engine import TrendResult
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class BasePlatform(ABC):
     """Base interface for all notification platforms."""
-    
+
     @abstractmethod
     def send_alert(self, result: TrendResult) -> bool:
         """Send an alert to the platform. Returns True if successful."""
@@ -25,10 +26,8 @@ class BasePlatform(ABC):
 
 class TelegramPlatform(BasePlatform):
     """Sends trend alerts to a Telegram chat."""
-    
+
     def __init__(self, token: str, chat_id: str):
-        
-        print(f"telegram Token: {token} Chat ID: {chat_id}")
         self.token = token
         self.chat_id = chat_id
 
@@ -77,34 +76,56 @@ class TelegramPlatform(BasePlatform):
 
 class AlertDispatcher:
     """Manages dispatching alerts to all configured platforms."""
-    
+
+    # Minimum seconds between repeat alerts for the same (ticker, timeframe, direction).
+    # Prevents flooding when the scanner re-fires every minute on an ongoing trend.
+    COOLDOWN_SECONDS: int = 3600  # 1 hour default
+
     def __init__(self):
         self._platforms: List[BasePlatform] = []
         self._initialized = False
-        
+        # key: (ticker, timeframe, direction) → last alert epoch timestamp
+        self._last_alerted: Dict[Tuple[str, str, str], float] = {}
+
     def _initialize_platforms(self):
         if self._initialized:
             return
-            
+
         if getattr(CFG, "notifications", None):
             # Register Telegram if enabled
             if CFG.notifications.telegram.enabled:
                 self._platforms.append(TelegramPlatform(
                     token=CFG.notifications.telegram.bot_token,
-                    chat_id=CFG.notifications.telegram.chat_id
+                    chat_id=CFG.notifications.telegram.chat_id,
                 ))
-            
+
         self._initialized = True
+
+    def _is_on_cooldown(self, result: TrendResult) -> bool:
+        """Return True if this ticker+timeframe+direction was already alerted recently."""
+        key = (result.ticker, result.timeframe, result.direction)
+        last = self._last_alerted.get(key)
+        if last is None:
+            return False
+        return (time.monotonic() - last) < self.COOLDOWN_SECONDS
 
     def dispatch(self, result: TrendResult):
         """Dispatch a trend result to all registered communication platforms."""
-        # Only dispatch if it's a valid trend and not vetoed
         if not result.is_trending or getattr(result, "veto_killed", False):
             return
-            
+
         self._initialize_platforms()
+
+        key = (result.ticker, result.timeframe, result.direction)
+        if self._is_on_cooldown(result):
+            cooldown_remaining = int(self.COOLDOWN_SECONDS - (time.monotonic() - self._last_alerted[key]))
+            print(f"  ⏳ Alert suppressed for {result.ticker} [{result.timeframe}] — cooldown {cooldown_remaining}s remaining")
+            return
+
         for platform in self._platforms:
             platform.send_alert(result)
+
+        self._last_alerted[key] = time.monotonic()
 
 
 # Global singleton dispatcher

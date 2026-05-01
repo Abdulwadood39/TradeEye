@@ -45,21 +45,27 @@ def _c(text: str, code: str) -> str:
 def print_result(result: TrendResult, verbose: bool = None):
     """
     Print a formatted trend result to the terminal.
-    Shows abbreviated info for non-trends, full box for detected trends.
+
+    Default (server-friendly): only prints detected trends (full box).
+    With --all / print_all=True: also prints one-liner for no-trend tickers.
     """
     verbose = verbose if verbose is not None else CFG.alerts.verbose
     is_trend = result.is_trending
 
-    if not is_trend and not getattr(result, "veto_killed", False) and not CFG.alerts.print_all:
-        # One-liner for clean no-trend (not veto-killed)
+    if not is_trend:
+        if not CFG.alerts.print_all:
+            # Server mode: suppress no-trend noise — summary already shows counts
+            return
+        # --all: compact one-liner so the user knows it was scanned
+        status = "VETOED" if getattr(result, "veto_killed", False) else "NO TREND"
         print(
             _c(f"  ➡️  {result.ticker:<12} {result.timeframe:<4}", _GREY) +
-            _c(f"  NO TREND  ", _GREY) +
+            _c(f"  {status:<10}", _GREY) +
             _c(f"score={result.score}/5", _GREY)
         )
         return
 
-    # ── Full alert box ───────────────────────────────────────────────────────
+    # ── Full alert box (trending tickers only) ───────────────────────────────
     if getattr(result, "veto_killed", False):
         direction_label = "VETOED (FALSE POSITIVE)"
         border_color = _RED
