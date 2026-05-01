@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip3 list:*)",
+      "Bash(python3:*)",
+      "Bash(pip3 install:*)",
+      "Bash(curl -s --max-time 10 https://api.telegram.org)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(curl -s --max-time 10 https://google.com)"
+    ]
+  }
+}

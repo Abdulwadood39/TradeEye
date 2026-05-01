@@ -1,5 +1,7 @@
 
 __pycache__
-.claude
+
+.env
 .extras
+
 trend_scanner/output/*

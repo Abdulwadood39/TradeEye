@@ -4,8 +4,11 @@ config.py — Central configuration for the iTrade Agentic Trend Scanner
 All tunable parameters live here. Edit thresholds to adjust sensitivity.
 """
 from __future__ import annotations
+import os
 from dataclasses import dataclass, field
 from typing import List, Dict
+from dotenv import load_dotenv
+load_dotenv()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -13,40 +16,52 @@ from typing import List, Dict
 # ─────────────────────────────────────────────────────────────────────────────
 
 FOREX_TICKERS: List[str] = [
-    # Majors
-    "EURUSD=X", "USDJPY=X", "GBPUSD=X", "USDCHF=X", "USDCAD=X", "AUDUSD=X", "NZDUSD=X",
-    # EUR Crosses
-    "EURGBP=X", "EURJPY=X", "EURCHF=X", "EURCAD=X", "EURAUD=X", "EURNZD=X",
-    # GBP Crosses
-    "GBPJPY=X", "GBPCHF=X", "GBPCAD=X", "GBPAUD=X", "GBPNZD=X",
-    # AUD Crosses
-    "AUDJPY=X", "AUDCHF=X", "AUDCAD=X", "AUDNZD=X",
-    # NZD Crosses
-    "NZDJPY=X", "NZDCHF=X", "NZDCAD=X",
-    # CAD & CHF Crosses
-    "CADJPY=X", "CADCHF=X", "CHFJPY=X",
-    # Minor/Exotic USD Crosses
-    "USDMXN=X", "USDZAR=X", "USDTRY=X", "USDSEK=X", "USDNOK=X", "USDDKK=X",
-    "USDSGD=X", "USDHKD=X", "USDCNH=X", "USDPLN=X", "USDHUF=X", "USDCZK=X",
-    "USDINR=X", "USDTHB=X", "USDKRW=X", "USDTWD=X", "USDIDR=X", "USDMYR=X",
-    "USDPHP=X", "USDCLP=X", "USDCOP=X", "USDBRL=X", "USDPEN=X", "USDARS=X",
-    "USDILS=X",
-    # Minor/Exotic EUR Crosses
-    "EURMXN=X", "EURZAR=X", "EURTRY=X", "EURSEK=X", "EURNOK=X", "EURDKK=X",
-    "EURPLN=X", "EURHUF=X", "EURCZK=X", "EURSGD=X", "EURHKD=X", "EURILS=X",
-    # Minor/Exotic GBP Crosses
-    "GBPSEK=X", "GBPNOK=X", "GBPDKK=X", "GBPZAR=X", "GBPSGD=X", "GBPHKD=X",
-    "GBPTRY=X", "GBPPLN=X",
-    # Minor/Exotic AUD & NZD Crosses
-    "AUDSGD=X", "AUDHKD=X", "NZDSGD=X",
-    # Minor/Exotic CAD & CHF Crosses
-    "CADSGD=X", "CADHKD=X", "CHFSGD=X", "CHFHKD=X", "CHFPLN=X", "CHFZAR=X",
-    # Additional Asian/Emerging Crosses
-    "SGDJPY=X", "HKDJPY=X", "ZARJPY=X", "MXNJPY=X", "TRYJPY=X", "SEKJPY=X",
-    "NOKJPY=X", "PLNJPY=X", "SGDHKD=X",
-    # CNH and INR Crosses
-    "EURCNH=X", "GBPCNH=X", "AUDCNH=X", "NZDCNH=X", "CADCNH=X", "CHFCNH=X",
-    "EURINR=X", "GBPINR=X", "AUDINR=X", "JPYINR=X"
+    'EURUSD=X', 'GBPUSD=X', 'AUDUSD=X', 'NZDUSD=X', 'USDCAD=X', 'USDCHF=X', 'USDJPY=X', 'EURGBP=X', 'EURAUD=X', 'EURNZD=X',
+    'EURCAD=X', 'EURCHF=X', 'EURJPY=X', 'GBPAUD=X', 'GBPNZD=X', 'GBPCAD=X', 'GBPCHF=X', 'GBPJPY=X', 'AUDNZD=X', 'AUDCAD=X',
+    'AUDCHF=X', 'AUDJPY=X', 'NZDCAD=X', 'NZDCHF=X', 'NZDJPY=X', 'CADCHF=X', 'CADJPY=X', 'CHFJPY=X', 'USDHKD=X', 'USDSGD=X',
+    'USDZAR=X', 'USDTRY=X', 'USDMXN=X', 'USDNOK=X', 'USDSEK=X', 'USDDKK=X', 'USDPLN=X', 'USDHUF=X', 'USDCZK=X', 'USDTHB=X',
+    'USDKRW=X', 'USDIDR=X', 'USDPHP=X', 'USDTWD=X', 'USDMYR=X', 'USDVND=X', 'USDBRL=X', 'USDCLP=X', 'USDCOP=X', 'USDPEN=X',
+    'USDARS=X', 'USDUYU=X', 'USDISK=X', 'USDRON=X', 'USDBGN=X', 'USDAED=X', 'USDSAR=X', 'USDQAR=X', 'USDKWD=X', 'USDOMR=X',
+    'USDBHD=X', 'USDJOD=X', 'USDEGP=X', 'USDNGN=X', 'USDKES=X', 'USDGHS=X', 'USDTZS=X', 'USDUGX=X', 'USDMAD=X', 'USDTND=X',
+    'USDXOF=X', 'USDXAF=X', 'USDCRC=X', 'USDPAB=X', 'USDDOP=X', 'USDJMD=X', 'USDBBD=X', 'USDBSD=X', 'USDTTD=X', 'USDBZD=X',
+    'EURSGD=X', 'EURHKD=X', 'EURZAR=X', 'EURTRY=X', 'EURMXN=X', 'EURNOK=X', 'EURSEK=X', 'EURDKK=X', 'EURPLN=X', 'EURHUF=X',
+    'EURCZK=X', 'EURTHB=X', 'EURKRW=X', 'EURIDR=X', 'EURPHP=X', 'EURTWD=X', 'EURMYR=X', 'EURVND=X', 'EURBRL=X', 'EURCLP=X',
+    'EURCOP=X', 'EURPEN=X', 'EURARS=X', 'EURUYU=X', 'EURISK=X', 'EURRON=X', 'EURBGN=X', 'EURAED=X', 'EURSAR=X', 'EURQAR=X',
+    'EURKWD=X', 'EUROMR=X', 'EURBHD=X', 'EURJOD=X', 'EUREGP=X', 'EURNGN=X', 'EURKES=X', 'EURGHS=X', 'EURTZS=X', 'EURUGX=X',
+    'GBPSGD=X', 'GBPHKD=X', 'GBPZAR=X', 'GBPTRY=X', 'GBPMXN=X', 'GBPNOK=X', 'GBPSEK=X', 'GBPDKK=X', 'GBPPLN=X', 'GBPHUF=X',
+    'GBPCZK=X', 'GBPTHB=X', 'GBPKRW=X', 'GBPIDR=X', 'GBPPHP=X', 'GBPTWD=X', 'GBPMYR=X', 'GBPVND=X', 'GBPBRL=X', 'GBPCLP=X',
+    'GBPCOP=X', 'GBPPEN=X', 'GBPARS=X', 'GBPUYU=X', 'GBPISK=X', 'GBPRON=X', 'GBPBGN=X', 'GBPAED=X', 'GBPSAR=X', 'GBPQAR=X',
+    'GBPKWD=X', 'GBPOMR=X', 'GBPBHD=X', 'GBPJOD=X', 'GBPEGP=X', 'GBPNGN=X', 'GBPKES=X', 'GBPGHS=X', 'GBPTZS=X', 'GBPUGX=X',
+    'AUDSGD=X', 'AUDHKD=X', 'AUDZAR=X', 'AUDTRY=X', 'AUDMXN=X', 'AUDNOK=X', 'AUDSEK=X', 'AUDDKK=X', 'AUDPLN=X', 'AUDHUF=X',
+    'AUDCZK=X', 'AUDTHB=X', 'AUDKRW=X', 'AUDIDR=X', 'AUDPHP=X', 'AUDTWD=X', 'AUDMYR=X', 'AUDVND=X', 'AUDBRL=X', 'AUDCLP=X',
+    'AUDCOP=X', 'AUDPEN=X', 'AUDARS=X', 'AUDUYU=X', 'AUDISK=X', 'AUDRON=X', 'AUDBGN=X', 'AUDAED=X', 'AUDSAR=X', 'AUDQAR=X',
+    'AUDKWD=X', 'AUDOMR=X', 'AUDBHD=X', 'AUDJOD=X', 'AUDEGP=X', 'AUDNGN=X', 'AUDKES=X', 'AUDGHS=X', 'AUDTZS=X', 'AUDUGX=X',
+    'NZDSGD=X', 'NZDHKD=X', 'NZDZAR=X', 'NZDTRY=X', 'NZDMXN=X', 'NZDNOK=X', 'NZDSEK=X', 'NZDDKK=X', 'NZDPLN=X', 'NZDHUF=X',
+    'NZDCZK=X', 'NZDTHB=X', 'NZDKRW=X', 'NZDIDR=X', 'NZDPHP=X', 'NZDTWD=X', 'NZDMYR=X', 'NZDVND=X', 'NZDBRL=X', 'NZDCLP=X',
+    'NZDCOP=X', 'NZDPEN=X', 'NZDARS=X', 'NZDUYU=X', 'NZDISK=X', 'NZDRON=X', 'NZDBGN=X', 'NZDAED=X', 'NZDSAR=X', 'NZDQAR=X',
+    'NZDKWD=X', 'NZDOMR=X', 'NZDBHD=X', 'NZDJOD=X', 'NZDEGP=X', 'NZDNGN=X', 'NZDKES=X', 'NZDGHS=X', 'NZDTZS=X', 'NZDUGX=X',
+    'CADSGD=X', 'CADHKD=X', 'CADZAR=X', 'CADTRY=X', 'CADMXN=X', 'CADNOK=X', 'CADSEK=X', 'CADDKK=X', 'CADPLN=X', 'CADHUF=X',
+    'CADCZK=X', 'CADTHB=X', 'CADKRW=X', 'CADIDR=X', 'CADPHP=X', 'CADTWD=X', 'CADMYR=X', 'CADVND=X', 'CADBRL=X', 'CADCLP=X',
+    'CADCOP=X', 'CADPEN=X', 'CADARS=X', 'CADUYU=X', 'CADISK=X', 'CADRON=X', 'CADBGN=X', 'CADAED=X', 'CADSAR=X', 'CADQAR=X',
+    'CADKWD=X', 'CADOMR=X', 'CADBHD=X', 'CADJOD=X', 'CADEGP=X', 'CADNGN=X', 'CADKES=X', 'CADGHS=X', 'CADTZS=X', 'CADUGX=X',
+    'CHFSGD=X', 'CHFHKD=X', 'CHFZAR=X', 'CHFTRY=X', 'CHFMXN=X', 'CHFNOK=X', 'CHFSEK=X', 'CHFDKK=X', 'CHFPLN=X', 'CHFHUF=X',
+    'CHFCZK=X', 'CHFTHB=X', 'CHFKRW=X', 'CHFIDR=X', 'CHFPHP=X', 'CHFTWD=X', 'CHFMYR=X', 'CHFVND=X', 'CHFBRL=X', 'CHFCLP=X',
+    'CHFCOP=X', 'CHFPEN=X', 'CHFARS=X', 'CHFUYU=X', 'CHFISK=X', 'CHFRON=X', 'CHFBGN=X', 'CHFAED=X', 'CHFSAR=X', 'CHFQAR=X',
+    'CHFKWD=X', 'CHFOMR=X', 'CHFBHD=X', 'CHFJOD=X', 'CHFEGP=X', 'CHFNGN=X', 'CHFKES=X', 'CHFGHS=X', 'CHFTZS=X', 'CHFUGX=X',
+    'JPYSGD=X', 'JPYHKD=X', 'JPYZAR=X', 'JPYTRY=X', 'JPYMXN=X', 'JPYNOK=X', 'JPYSEK=X', 'JPYDKK=X', 'JPYPLN=X', 'JPYHUF=X',
+    'JPYCZK=X', 'JPYTHB=X', 'JPYKRW=X', 'JPYIDR=X', 'JPYPHP=X', 'JPYTWD=X', 'JPYMYR=X', 'JPYVND=X', 'JPYBRL=X', 'JPYCLP=X',
+    'JPYCOP=X', 'JPYPEN=X', 'JPYARS=X', 'JPYUYU=X', 'JPYISK=X', 'JPYRON=X', 'JPYBGN=X', 'JPYAED=X', 'JPYSAR=X', 'JPYQAR=X',
+    'JPYKWD=X', 'JPYOMR=X', 'JPYBHD=X', 'JPYJOD=X', 'JPYEGP=X', 'JPYNGN=X', 'JPYKES=X', 'JPYGHS=X', 'JPYTZS=X', 'JPYUGX=X',
+    'SGDHKD=X', 'SGDZAR=X', 'SGDTRY=X', 'SGDMXN=X', 'SGDNOK=X', 'SGDSEK=X', 'SGDDKK=X', 'SGDPLN=X', 'SGDHUF=X', 'SGDCZK=X',
+    'SGDTHB=X', 'SGDKRW=X', 'SGDIDR=X', 'SGDPHP=X', 'SGDTWD=X', 'SGDMYR=X', 'SGDVND=X', 'SGDBRL=X', 'SGDCLP=X', 'SGDCOP=X',
+    'SGDPEN=X', 'SGDARS=X', 'SGDUYU=X', 'SGDISK=X', 'SGDRON=X', 'SGDBGN=X', 'SGDAED=X', 'SGDSAR=X', 'SGDQAR=X', 'SGDKWD=X',
+    'SGDOMR=X', 'SGDBHD=X', 'SGDJOD=X', 'SGDEGP=X', 'SGDNGN=X', 'SGDKES=X', 'SGDGHS=X', 'SGDTZS=X', 'SGDUGX=X', 'HKDZAR=X',
+    'HKDTRY=X', 'HKDMXN=X', 'HKDNOK=X', 'HKDSEK=X', 'HKDDKK=X', 'HKDPLN=X', 'HKDHUF=X', 'HKDCZK=X', 'HKDTHB=X', 'HKDKRW=X',
+    'HKDIDR=X', 'HKDPHP=X', 'HKDTWD=X', 'HKDMYR=X', 'HKDVND=X', 'HKDBRL=X', 'HKDCLP=X', 'HKDCOP=X', 'HKDPEN=X', 'HKDARS=X',
+    'HKDUYU=X', 'HKDISK=X', 'HKDRON=X', 'HKDBGN=X', 'HKDAED=X', 'HKDSAR=X', 'HKDQAR=X', 'HKDKWD=X', 'HKDOMR=X', 'HKDBHD=X',
+    'HKDJOD=X', 'HKDEGP=X', 'HKDNGN=X', 'HKDKES=X', 'HKDGHS=X', 'HKDTZS=X', 'HKDUGX=X', 'ZARTRY=X', 'ZARMXN=X', 'ZARNOK=X',
+    'ZARSEK=X', 'ZARDKK=X', 'ZARPLN=X', 'ZARHUF=X', 'ZARCZK=X', 'ZARTHB=X', 'ZARKRW=X', 'ZARIDR=X', 'ZARPHP=X', 'ZARTWD=X',
+    'ZARMYR=X', 'ZARVND=X', 'ZARBRL=X', 'ZARCLP=X', 'ZARCOP=X', 'ZARPEN=X', 'ZARARS=X', 'ZARUYU=X', 'ZARISK=X', 'ZARRON=X'
 ]
 
 DEFAULT_TICKERS: List[str] = [
@@ -201,6 +216,21 @@ class AlertConfig:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# NOTIFICATIONS / EXTERNAL ALERTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class TelegramConfig:
+    enabled: bool = False
+    bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")    # Your Telegram Bot Token
+    chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")        # Your Telegram Chat ID
+
+@dataclass
+class NotificationsConfig:
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # WATCH MODE (continuous scanning)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -221,6 +251,7 @@ class ScannerConfig:
     chart:   ChartConfig = field(default_factory=ChartConfig)
     vlm:     VLMConfig   = field(default_factory=VLMConfig)
     alerts:  AlertConfig = field(default_factory=AlertConfig)
+    notifications: NotificationsConfig = field(default_factory=NotificationsConfig)
     watch:   WatchConfig = field(default_factory=WatchConfig)
 
 

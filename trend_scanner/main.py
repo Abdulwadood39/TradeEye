@@ -39,6 +39,7 @@ from trend_scanner.alerts.notifier import (
     print_scan_summary,
     log_all,
 )
+from trend_scanner.alerts.dispatcher import dispatch_trend_alert
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -104,6 +105,9 @@ def run_scan(
             CFG.alerts.print_all = print_all
             print_result(result, verbose=verbose)
 
+            # 6. Dispatch external alerts
+            dispatch_trend_alert(result)
+
             all_results.append(result)
 
     # Summary + CSV log
@@ -161,6 +165,12 @@ def parse_args():
         "--vlm",
         action="store_true",
         help="Enable Qwen2.5-VL visual verification via local Ollama (slower but adds visual crosscheck)",
+    )
+
+    parser.add_argument(
+        "--telegram",
+        action="store_true",
+        help="Enable Telegram notifications for detected trends",
     )
 
     parser.add_argument(
@@ -226,6 +236,8 @@ def main():
         CFG.trend.analysis_window = n_candles
 
     CFG.vlm.enabled = args.vlm
+    if args.telegram:
+        CFG.notifications.telegram.enabled = True
 
     # ── VLM pre-flight ───────────────────────────────────────────────────────
     if args.vlm:
