@@ -5,3 +5,4 @@ __pycache__
 .extras
 
 trend_scanner/output/*
+.venv
