@@ -9,9 +9,12 @@ Supports fetching 2000–3000+ candles across 1h and 1d timeframes.
 """
 from __future__ import annotations
 
+import logging
 import time
 import warnings
 from typing import Optional, List, Dict
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import pandas as pd
@@ -183,7 +186,7 @@ def _fetch_yfinance(
     retries: int = None,
 ) -> Optional[pd.DataFrame]:
     if not _HAS_YFINANCE:
-        print("  [ERR] yfinance not installed. Run: pip install yfinance")
+        logger.error("  [ERR] yfinance not installed. Run: pip install yfinance")
         return None
 
     retries = retries or CFG.data.max_retries
@@ -201,16 +204,16 @@ def _fetch_yfinance(
                 repair=True,
             )
             if raw is None or raw.empty:
-                print(f"  [WARN] yfinance: No data for {ticker} {timeframe}")
+                logger.warning(f"  [WARN] yfinance: No data for {ticker} {timeframe}")
                 return None
 
             df = normalize(raw, source="yfinance")
             if df is not None and len(df) > 0:
-                print(f"  [OK] {ticker} {timeframe} via yfinance: {len(df)} bars")
+                logger.info(f"  [OK] {ticker} {timeframe} via yfinance: {len(df)} bars")
                 return df
 
         except Exception as e:
-            print(f"  [ERR] yfinance {ticker} {timeframe} (attempt {attempt+1}): {e}")
+            logger.error(f"  [ERR] yfinance {ticker} {timeframe} (attempt {attempt+1}): {e}")
             if attempt < retries - 1:
                 time.sleep(CFG.data.retry_delay)
 
@@ -248,7 +251,7 @@ def _fetch_ccxt(
     Paginates automatically to reach n_candles.
     """
     if not _HAS_CCXT:
-        print("  [ERR] ccxt not installed. Run: pip install ccxt")
+        logger.error("  [ERR] ccxt not installed. Run: pip install ccxt")
         return None
 
     exchange = _get_exchange()
@@ -270,7 +273,7 @@ def _fetch_ccxt(
     for attempt in range(retries):
         try:
             if not exchange.has.get("fetchOHLCV", False):
-                print(f"  [ERR] {CFG.data.ccxt_exchange} does not support fetchOHLCV")
+                logger.error(f"  [ERR] {CFG.data.ccxt_exchange} does not support fetchOHLCV")
                 return None
 
             all_ohlcv = []
@@ -289,7 +292,7 @@ def _fetch_ccxt(
                 time.sleep(exchange.rateLimit / 1000)
 
             if not all_ohlcv:
-                print(f"  [WARN] CCXT: No data for {symbol} {tf}")
+                logger.warning(f"  [WARN] CCXT: No data for {symbol} {tf}")
                 return None
 
             df = pd.DataFrame(
@@ -298,11 +301,11 @@ def _fetch_ccxt(
             )
             df = normalize(df, source="ccxt")
             if df is not None and len(df) > 0:
-                print(f"  [OK] {ticker} ({symbol}) {tf} via CCXT: {len(df)} bars")
+                logger.info(f"  [OK] {ticker} ({symbol}) {tf} via CCXT: {len(df)} bars")
                 return df
 
         except Exception as e:
-            print(f"  [ERR] CCXT {symbol} {tf} (attempt {attempt+1}): {e}")
+            logger.error(f"  [ERR] CCXT {symbol} {tf} (attempt {attempt+1}): {e}")
             if attempt < retries - 1:
                 time.sleep(CFG.data.retry_delay)
                 _ccxt_exchange = None  # reset exchange on error

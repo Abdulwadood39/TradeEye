@@ -16,6 +16,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import threading
 import time
@@ -35,6 +36,31 @@ from trend_scanner.alerts.notifier import (
 )
 from trend_scanner.alerts.dispatcher import dispatch_trend_alert, DISPATCHER
 
+logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGGING SETUP
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _setup_logging() -> None:
+    """
+    Configure root logger for trend_scanner.
+    Uses %(message)s format to preserve existing visual formatting.
+    Suppresses noisy third-party library loggers.
+    """
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+
+    root = logging.getLogger("trend_scanner")
+    root.setLevel(logging.INFO)
+    if not root.handlers:
+        root.addHandler(handler)
+
+    # Silence verbose third-party loggers
+    for lib in ("yfinance", "urllib3", "requests", "peewee", "asyncio", "ccxt"):
+        logging.getLogger(lib).setLevel(logging.WARNING)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # THREAD SAFETY
@@ -42,11 +68,6 @@ from trend_scanner.alerts.dispatcher import dispatch_trend_alert, DISPATCHER
 
 _print_lock = threading.Lock()
 _csv_lock   = threading.Lock()
-
-
-def _locked_print(*args, **kwargs):
-    with _print_lock:
-        print(*args, **kwargs)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,10 +148,10 @@ def run_parallel_scan(
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with _print_lock:
-        print(f"\n{'═' * 60}")
-        print(f"  {scan_label}  [{timeframe.upper()}]  {now}")
-        print(f"  {len(tickers)} tickers  ·  {workers} workers  ·  {n_candles} candles")
-        print(f"{'═' * 60}")
+        logger.info(f"\n{'═' * 60}")
+        logger.info(f"  {scan_label}  [{timeframe.upper()}]  {now}")
+        logger.info(f"  {len(tickers)} tickers  ·  {workers} workers  ·  {n_candles} candles")
+        logger.info(f"{'═' * 60}")
 
     results: List[TrendResult] = []
 
@@ -146,7 +167,7 @@ def run_parallel_scan(
                 if result is not None:
                     results.append(result)
             except Exception as exc:
-                _locked_print(f"  [ERR] {ticker} [{timeframe}]: {exc}")
+                logger.error(f"  [ERR] {ticker} [{timeframe}]: {exc}")
 
     # with _print_lock:
     #     print_scan_summary(results)
@@ -253,13 +274,13 @@ def run_continuous(
         name="scan-1m",
     )
 
-    print(f"\n  Continuous dual-loop scanner started.")
+    logger.info(f"\n  Continuous dual-loop scanner started.")
     def _fmt(sec: int) -> str:
         return f"{sec // 3600}h" if sec >= 3600 else f"{sec // 60}m"
 
-    print(f"  1h scan  — every {_fmt(hourly_interval_sec)},  {len(tickers)} tickers, {workers} workers")
-    print(f"  1m scan  — every {_fmt(minutely_interval_sec)},  {len(tickers)} tickers, {workers} workers")
-    print(f"  Ctrl+C to stop.\n")
+    logger.info(f"  1h scan  — every {_fmt(hourly_interval_sec)},  {len(tickers)} tickers, {workers} workers")
+    logger.info(f"  1m scan  — every {_fmt(minutely_interval_sec)},  {len(tickers)} tickers, {workers} workers")
+    logger.info(f"  Ctrl+C to stop.\n")
 
     hourly_thread.start()
     minutely_thread.start()
@@ -268,11 +289,11 @@ def run_continuous(
         while hourly_thread.is_alive() or minutely_thread.is_alive():
             time.sleep(0.5)
     except KeyboardInterrupt:
-        print("\n\n  Stopping — waiting for current scans to finish (max 30s)...")
+        logger.info("\n\n  Stopping — waiting for current scans to finish (max 30s)...")
         stop_event.set()
         hourly_thread.join(timeout=30)
         minutely_thread.join(timeout=30)
-        print("  Goodbye!\n")
+        logger.info("  Goodbye!\n")
         sys.exit(0)
 
 
@@ -345,6 +366,7 @@ def _parse_args():
 
 
 def main():
+    _setup_logging()
     args = _parse_args()
 
     # ── Apply overrides ──────────────────────────────────────────────────────
@@ -358,13 +380,13 @@ def main():
     # ── VLM pre-flight ───────────────────────────────────────────────────────
     vlm_enabled = args.vlm
     if vlm_enabled:
-        print(f"\n  Checking VLM ({CFG.vlm.model})...")
+        logger.info(f"\n  Checking VLM ({CFG.vlm.model})...")
         if not check_vlm_available():
-            print(f"  VLM model {CFG.vlm.model} not found. Pull with: ollama pull {CFG.vlm.model}")
-            print("  Continuing in math-only mode.\n")
+            logger.warning(f"  VLM model {CFG.vlm.model} not found. Pull with: ollama pull {CFG.vlm.model}")
+            logger.info("  Continuing in math-only mode.\n")
             vlm_enabled = False
         else:
-            print(f"  VLM ready: {CFG.vlm.model}\n")
+            logger.info(f"  VLM ready: {CFG.vlm.model}\n")
 
     workers         = args.workers
     verbose         = not args.quiet

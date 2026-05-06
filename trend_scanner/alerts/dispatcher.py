@@ -29,11 +29,11 @@ class TelegramPlatform(BasePlatform):
 
     def __init__(self, token: str, chat_id: str):
         self.token = token
-        self.chat_id = chat_id
+        self.chat_ids = [cid.strip() for cid in chat_id.split(',')] if chat_id else []
 
     def send_alert(self, result: TrendResult) -> bool:
-        if not self.token or not self.chat_id:
-            print("  ⚠️  Telegram token or chat_id missing. Cannot send alert.")
+        if not self.token or not self.chat_ids:
+            logger.warning("  ⚠️  Telegram token or chat_id(s) missing. Cannot send alert.")
             return False
 
         message = (
@@ -48,30 +48,35 @@ class TelegramPlatform(BasePlatform):
 
         url = f"https://api.telegram.org/bot{self.token}/"
         
-        try:
-            # If chart exists, send photo with caption
-            chart_path = getattr(result, "chart_1h_path", None) or getattr(result, "chart_1d_path", None)
-            if chart_path:
-                with open(chart_path, 'rb') as photo:
+        success = True
+        chart_path = getattr(result, "chart_1h_path", None) or getattr(result, "chart_1d_path", None)
+        
+        for cid in self.chat_ids:
+            try:
+                # If chart exists, send photo with caption
+                if chart_path:
+                    # We need to reopen the file for each request if we are iterating
+                    with open(chart_path, 'rb') as photo:
+                        resp = requests.post(
+                            url + "sendPhoto",
+                            data={"chat_id": cid, "caption": message, "parse_mode": "Markdown"},
+                            files={"photo": photo},
+                            timeout=30
+                        )
+                else:
                     resp = requests.post(
-                        url + "sendPhoto",
-                        data={"chat_id": self.chat_id, "caption": message, "parse_mode": "Markdown"},
-                        files={"photo": photo},
+                        url + "sendMessage",
+                        data={"chat_id": cid, "text": message, "parse_mode": "Markdown"},
                         timeout=30
                     )
-            else:
-                resp = requests.post(
-                    url + "sendMessage",
-                    data={"chat_id": self.chat_id, "text": message, "parse_mode": "Markdown"},
-                    timeout=30
-                )
-            
-            resp.raise_for_status()
-            print(f"  📩 Telegram alert sent for {result.ticker} [{result.timeframe}]")
-            return True
-        except Exception as e:
-            print(f"  ❌ Failed to send Telegram alert: {e}")
-            return False
+                
+                resp.raise_for_status()
+                logger.info(f"  📩 Telegram alert sent for {result.ticker} [{result.timeframe}] to {cid}")
+            except Exception as e:
+                logger.error(f"  ❌ Failed to send Telegram alert to {cid}: {e}")
+                success = False
+                
+        return success
 
 
 class AlertDispatcher:
@@ -119,7 +124,7 @@ class AlertDispatcher:
         key = (result.ticker, result.timeframe, result.direction)
         if self._is_on_cooldown(result):
             cooldown_remaining = int(self.COOLDOWN_SECONDS - (time.monotonic() - self._last_alerted[key]))
-            print(f"  ⏳ Alert suppressed for {result.ticker} [{result.timeframe}] — cooldown {cooldown_remaining}s remaining")
+            logger.info(f"  ⏳ Alert suppressed for {result.ticker} [{result.timeframe}] — cooldown {cooldown_remaining}s remaining")
             return
 
         for platform in self._platforms:

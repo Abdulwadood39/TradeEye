@@ -13,9 +13,12 @@ Produces:
 """
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from typing import Optional, List
+
+logger = logging.getLogger(__name__)
 
 import matplotlib
 matplotlib.use("Agg")
@@ -69,7 +72,7 @@ def generate_chart(
         path = _draw_trend_chart(plot_df, result, timeframe, cfg)
         return path
     except Exception as e:
-        print(f"  [WARN] Chart generation failed for {result.ticker}: {e}")
+        logger.warning(f"  [WARN] Chart generation failed for {result.ticker}: {e}")
         return None
 
 
