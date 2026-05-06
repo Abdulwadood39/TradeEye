@@ -23,6 +23,11 @@ class BasePlatform(ABC):
         """Send an alert to the platform. Returns True if successful."""
         pass
 
+    @abstractmethod
+    def send_message(self, text: str) -> bool:
+        """Send a plain text message to the platform. Returns True if successful."""
+        pass
+
 
 class TelegramPlatform(BasePlatform):
     """Sends trend alerts to a Telegram chat."""
@@ -78,13 +83,34 @@ class TelegramPlatform(BasePlatform):
                 
         return success
 
+    def send_message(self, text: str) -> bool:
+        if not self.token or not self.chat_ids:
+            return False
+
+        url = f"https://api.telegram.org/bot{self.token}/sendMessage"
+        success = True
+        
+        for cid in self.chat_ids:
+            try:
+                resp = requests.post(
+                    url,
+                    data={"chat_id": cid, "text": text, "parse_mode": "Markdown"},
+                    timeout=30
+                )
+                resp.raise_for_status()
+                logger.info(f"  📩 Telegram message sent to {cid}")
+            except Exception as e:
+                logger.error(f"  ❌ Failed to send Telegram message to {cid}: {e}")
+                success = False
+                
+        return success
+
 
 class AlertDispatcher:
     """Manages dispatching alerts to all configured platforms."""
 
     # Minimum seconds between repeat alerts for the same (ticker, timeframe, direction).
     # Prevents flooding when the scanner re-fires every minute on an ongoing trend.
-    COOLDOWN_SECONDS: int = 3600  # 1 hour default
 
     def __init__(self):
         self._platforms: List[BasePlatform] = []
@@ -106,13 +132,7 @@ class AlertDispatcher:
 
         self._initialized = True
 
-    def _is_on_cooldown(self, result: TrendResult) -> bool:
-        """Return True if this ticker+timeframe+direction was already alerted recently."""
-        key = (result.ticker, result.timeframe, result.direction)
-        last = self._last_alerted.get(key)
-        if last is None:
-            return False
-        return (time.monotonic() - last) < self.COOLDOWN_SECONDS
+    
 
     def dispatch(self, result: TrendResult):
         """Dispatch a trend result to all registered communication platforms."""
@@ -122,15 +142,17 @@ class AlertDispatcher:
         self._initialize_platforms()
 
         key = (result.ticker, result.timeframe, result.direction)
-        if self._is_on_cooldown(result):
-            cooldown_remaining = int(self.COOLDOWN_SECONDS - (time.monotonic() - self._last_alerted[key]))
-            logger.info(f"  ⏳ Alert suppressed for {result.ticker} [{result.timeframe}] — cooldown {cooldown_remaining}s remaining")
-            return
 
         for platform in self._platforms:
             platform.send_alert(result)
 
         self._last_alerted[key] = time.monotonic()
+
+    def dispatch_message(self, text: str):
+        """Dispatch a plain text message to all registered communication platforms."""
+        self._initialize_platforms()
+        for platform in self._platforms:
+            platform.send_message(text)
 
 
 # Global singleton dispatcher
@@ -139,3 +161,7 @@ DISPATCHER = AlertDispatcher()
 def dispatch_trend_alert(result: TrendResult):
     """Helper function to dispatch an alert using the global dispatcher."""
     DISPATCHER.dispatch(result)
+
+def dispatch_text_message(text: str):
+    """Helper function to dispatch a plain text message using the global dispatcher."""
+    DISPATCHER.dispatch_message(text)

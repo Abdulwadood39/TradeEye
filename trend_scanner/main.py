@@ -34,7 +34,7 @@ from trend_scanner.alerts.notifier import (
     print_scan_summary,
     log_all,
 )
-from trend_scanner.alerts.dispatcher import dispatch_trend_alert, DISPATCHER
+from trend_scanner.alerts.dispatcher import dispatch_trend_alert, dispatch_text_message, DISPATCHER
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +152,19 @@ def run_parallel_scan(
         logger.info(f"  {scan_label}  [{timeframe.upper()}]  {now}")
         logger.info(f"  {len(tickers)} tickers  ·  {workers} workers  ·  {n_candles} candles")
         logger.info(f"{'═' * 60}")
+        
+    # Send Telegram notification about scan starting
+    if len(tickers) <= 10:
+        tickers_str = ", ".join(tickers)
+    else:
+        tickers_str = f"{', '.join(tickers[:10])} and {len(tickers) - 10} more"
+        
+    start_message = (
+        f"🔄 *{scan_label} Started* ({timeframe})\n"
+        f"Scanning {len(tickers)} tickers ({tickers_str}) "
+        f"analyzing the last {n_candles} candles."
+    )
+    dispatch_text_message(start_message)
 
     results: List[TrendResult] = []
 
