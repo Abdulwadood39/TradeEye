@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
 from typing import Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from trend_scanner.config import CFG
 
@@ -75,7 +78,7 @@ def verify_chart(chart_path: str) -> Tuple[Optional[str], Optional[float], Optio
     try:
         import ollama
     except ImportError:
-        print("  [WARN] VLM: ollama not installed. Run: pip install ollama")
+        logger.warning("  [WARN] VLM: ollama not installed. Run: pip install ollama")
         return None, None, None
 
     # Read + base64-encode the image
@@ -84,7 +87,7 @@ def verify_chart(chart_path: str) -> Tuple[Optional[str], Optional[float], Optio
             img_bytes = f.read()
         img_b64 = base64.b64encode(img_bytes).decode("utf-8")
     except Exception as e:
-        print(f"  [WARN] VLM: Could not read chart image: {e}")
+        logger.warning(f"  [WARN] VLM: Could not read chart image: {e}")
         return None, None, None
 
     # Call Ollama
@@ -102,9 +105,9 @@ def verify_chart(chart_path: str) -> Tuple[Optional[str], Optional[float], Optio
             options={"temperature": 0.1},   # low temp for consistent structured output
         )
     except Exception as e:
-        print(f"  [WARN] VLM: Ollama call failed: {e}")
-        print("         Is Ollama running? Try: ollama serve")
-        print(f"         Is model available? Try: ollama pull {cfg.model}")
+        logger.warning(f"  [WARN] VLM: Ollama call failed: {e}")
+        logger.warning("         Is Ollama running? Try: ollama serve")
+        logger.warning(f"         Is model available? Try: ollama pull {cfg.model}")
         return None, None, None
 
     # Parse JSON response
@@ -127,13 +130,13 @@ def _parse_response(text: str) -> Tuple[Optional[str], Optional[float], Optional
     # Try to find JSON block
     json_match = re.search(r"\{.*\}", stripped, re.DOTALL)
     if not json_match:
-        print(f"  [WARN] VLM: No JSON found in response: {text[:200]}")
+        logger.warning(f"  [WARN] VLM: No JSON found in response: {text[:200]}")
         return None, None, None
 
     try:
         data = json.loads(json_match.group(0))
     except json.JSONDecodeError as e:
-        print(f"  [WARN] VLM: JSON parse error: {e}  raw={text[:200]}")
+        logger.warning(f"  [WARN] VLM: JSON parse error: {e}  raw={text[:200]}")
         return None, None, None
 
     trend = data.get("trend", "").lower().strip()
@@ -164,7 +167,7 @@ def check_vlm_available(model: str = None) -> bool:
     try:
         import ollama
         models = ollama.list()
-        names = [m.get("name", "") for m in models.get("models", [])]
+        names = [m.get("model", "") for m in models.get("models", [])]
         return any(model in n for n in names)
     except Exception:
         return False

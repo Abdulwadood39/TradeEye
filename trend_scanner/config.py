@@ -4,23 +4,53 @@ config.py — Central configuration for the iTrade Agentic Trend Scanner
 All tunable parameters live here. Edit thresholds to adjust sensitivity.
 """
 from __future__ import annotations
+import os
 from dataclasses import dataclass, field
 from typing import List, Dict
+from dotenv import load_dotenv
+load_dotenv()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DEFAULT TICKER LISTS — override at runtime via CLI --tickers
 # ─────────────────────────────────────────────────────────────────────────────
 
+FOREX_TICKERS: List[str] = [
+    'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'USDCHF=X', 'AUDUSD=X', 'NZDUSD=X', 'USDCAD=X',
+    'EURGBP=X', 'EURJPY=X', 'EURCHF=X', 'EURAUD=X', 'EURNZD=X', 'EURCAD=X',
+    'GBPJPY=X', 'GBPCHF=X', 'GBPAUD=X', 'GBPCAD=X', 'GBPNZD=X',
+    'AUDJPY=X', 'AUDNZD=X', 'AUDCAD=X', 'AUDCHF=X',
+    'NZDJPY=X', 'NZDCAD=X', 'NZDCHF=X',
+    'CADJPY=X', 'CADCHF=X',
+    'CHFJPY=X',
+    'EURSEK=X', 'EURNOK=X', 'EURDKK=X',
+    'USDSEK=X', 'USDNOK=X', 'USDDKK=X',
+    'GBPSEK=X', 'GBPNOK=X',
+    'AUDJPY=X', 'EURHKD=X', 'USDSGD=X', 'EURSGD=X', 'SGDJPY=X',
+    'USDHKD=X', 'AUDSGD=X', 'CADSGD=X', 'CHFSGD=X', 'NZDSGD=X',
+    'EURPLN=X', 'USDPLN=X',
+    'EURCZK=X', 'USDCZK=X',
+    'EURHUF=X', 'USDHUF=X',
+    'USDMXN=X', 'EURMXN=X',
+    'USDZAR=X', 'EURZAR=X',
+    'USDTRY=X',
+    'USDBRL=X',
+    'USDKRW=X',
+    'USDTHB=X',
+    'USDTWD=X',
+    'USDILS=X',
+    'USDCLP=X'
+]
+
 DEFAULT_TICKERS: List[str] = [
     # Stocks
     "AAPL", "NVDA", "TSLA", "MSFT",
     # Crypto (yfinance format — auto-routed to CCXT Binance if CCXT source)
-    "BTC-USD", "ETH-USD", "SOL-USD",
+    # "BTC-USD", "ETH-USD", "SOL-USD",
     # Commodities
     "GC=F",   # Gold
     "CL=F",   # Crude Oil
-]
+] + FOREX_TICKERS
 
 # Map yfinance-style crypto tickers → CCXT symbol (BTC-USD → BTC/USDT)
 YFINANCE_TO_CCXT: Dict[str, str] = {
@@ -51,11 +81,8 @@ class DataConfig:
     # How many candles to analyse per timeframe
     n_candles: int = 3000
 
-    # Timeframes to scan — 1h for macro trend, 1m for intraday confirmation
+    # Timeframes to scan (yfinance interval strings)
     timeframes: List[str] = field(default_factory=lambda: ["1h", "1m"])
-
-    # For 1m: how many 1-minute candles to fetch (2000 ≈ ~33 hrs crypto / ~5 trading days stocks)
-    n_candles_1m: int = 3000
 
     # yfinance fetch periods
     period_1h: str = "2y"      # max supported by Yahoo Finance
@@ -80,7 +107,7 @@ class DataConfig:
 class TrendConfig:
     # === Signal 1: Linear Regression Slope ===
     # Minimum normalised slope (basis points per candle) to count as trending
-    slope_min_bps: float = 0.3
+    slope_min_bps: float = 0.15
 
     # === Signal 2: Mann-Kendall Test ===
     mk_alpha: float = 0.05          # significance level
@@ -93,11 +120,11 @@ class TrendConfig:
     # Pivot detection order (bars each side)
     pivot_order: int = 5
     # Minimum fraction of pivots that must show HH+HL (or LH+LL) structure
-    hh_hl_min_ratio: float = 0.60
+    hh_hl_min_ratio: float = 0.50
 
     # === Signal 5: Pivot Regression Channel ===
     # Both high-pivot and low-pivot regression lines must slope same direction
-    channel_slope_min_bps: float = 0.1   # normalized, same as slope_min_bps
+    channel_slope_min_bps: float = 0.15   # normalized, same as slope_min_bps
 
     # === VETO Signal A: R-squared Linearity Gate ===
     # R² of close prices vs regression line — low R² = noisy/sideways, not a clean trend
@@ -121,7 +148,9 @@ class TrendConfig:
     min_signals_for_trend: int = 3
 
     # Candle window to run signals over (use last N candles of fetched data)
-    analysis_window: int = 2000
+    analysis_window_1h: int = 2500    # 21 trading days
+    analysis_window_1m: int = 2500    # ~3.5 intraday hours
+    analysis_window: int = 3000      # Fallback
 
     # Timeframe-specific analysis windows
     analysis_window_1m: int = 500        # 1m: use last 500 candles for signals (≈8hrs)
@@ -170,7 +199,7 @@ class ChartConfig:
 @dataclass
 class VLMConfig:
     enabled: bool = False
-    model: str = "qwen2.5vl:7b"
+    model: str = "qwen3.5:4b"
     timeout: int = 120       # seconds to wait for Ollama response
     # Only run VLM when math score >= this (avoid wasting time on weak signals)
     min_score_to_verify: int = 3
@@ -184,9 +213,26 @@ class VLMConfig:
 class AlertConfig:
     log_dir: str = "trend_scanner/output/logs"
     log_file: str = "trend_log.csv"
-    # Print all results or only trends
+    # Print all results (including no-trend one-liners) — off by default (server-friendly)
     print_all: bool = False
     verbose: bool = True
+    # Save charts for ALL tickers, not just trending ones — off by default (debug/dev mode)
+    save_all_charts: bool = False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NOTIFICATIONS / EXTERNAL ALERTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class TelegramConfig:
+    enabled: bool = False
+    bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")    # Your Telegram Bot Token
+    chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")        # Your Telegram Chat ID
+
+@dataclass
+class NotificationsConfig:
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -210,6 +256,7 @@ class ScannerConfig:
     chart:   ChartConfig = field(default_factory=ChartConfig)
     vlm:     VLMConfig   = field(default_factory=VLMConfig)
     alerts:  AlertConfig = field(default_factory=AlertConfig)
+    notifications: NotificationsConfig = field(default_factory=NotificationsConfig)
     watch:   WatchConfig = field(default_factory=WatchConfig)
 
 

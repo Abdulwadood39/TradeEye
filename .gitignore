@@ -1,9 +1,8 @@
 
 __pycache__
-double_top_output
-extras
-live_scan_output
-new
-uptrend
-.claude
+
+.env
+.extras
+
 trend_scanner/output/*
+.venv
