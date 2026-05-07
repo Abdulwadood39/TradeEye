@@ -72,8 +72,8 @@ def verify_chart(chart_path: str) -> Tuple[Optional[str], Optional[float], Optio
     - reasoning  : str | None
     """
     cfg = CFG.vlm
-    if not cfg.enabled:
-        return None, None, None
+#    if not cfg.enabled:
+ #       return None, None, None
 
     try:
         import ollama
