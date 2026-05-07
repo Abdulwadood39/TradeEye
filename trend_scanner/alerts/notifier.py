@@ -4,6 +4,7 @@ notifier.py — Terminal alerts and CSV logging for trend detections.
 from __future__ import annotations
 
 import csv
+import logging
 import os
 import sys
 from datetime import datetime
@@ -11,6 +12,8 @@ from typing import List
 
 from trend_scanner.config import CFG
 from trend_scanner.engine.trend_engine import TrendResult
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -45,21 +48,27 @@ def _c(text: str, code: str) -> str:
 def print_result(result: TrendResult, verbose: bool = None):
     """
     Print a formatted trend result to the terminal.
-    Shows abbreviated info for non-trends, full box for detected trends.
+
+    Default (server-friendly): only prints detected trends (full box).
+    With --all / print_all=True: also prints one-liner for no-trend tickers.
     """
     verbose = verbose if verbose is not None else CFG.alerts.verbose
     is_trend = result.is_trending
 
-    if not is_trend and not getattr(result, "veto_killed", False) and not CFG.alerts.print_all:
-        # One-liner for clean no-trend (not veto-killed)
-        print(
+    if not is_trend:
+        if not CFG.alerts.print_all:
+            # Server mode: suppress no-trend noise — summary already shows counts
+            return
+        # --all: compact one-liner so the user knows it was scanned
+        status = "VETOED" if getattr(result, "veto_killed", False) else "NO TREND"
+        logger.info(
             _c(f"  ➡️  {result.ticker:<12} {result.timeframe:<4}", _GREY) +
-            _c(f"  NO TREND  ", _GREY) +
+            _c(f"  {status:<10}", _GREY) +
             _c(f"score={result.score}/5", _GREY)
         )
         return
 
-    # ── Full alert box ───────────────────────────────────────────────────────
+    # ── Full alert box (trending tickers only) ───────────────────────────────
     if getattr(result, "veto_killed", False):
         direction_label = "VETOED (FALSE POSITIVE)"
         border_color = _RED
@@ -71,26 +80,30 @@ def print_result(result: TrendResult, verbose: bool = None):
 
     border = "─" * 60
 
-    print()
-    print(_c(border, border_color))
+    logger.info("")
+    logger.info(_c(border, border_color))
 
-    print(_c(f"  {result.emoji}  {direction_label}", direction_color + _BOLD) +
-          _c(f"  ·  {result.ticker}  ·  {result.timeframe}", _BOLD))
+    logger.info(
+        _c(f"  {result.emoji}  {direction_label}", direction_color + _BOLD) +
+        _c(f"  ·  {result.ticker}  ·  {result.timeframe}", _BOLD)
+    )
 
     score_bar = "█" * result.score + "░" * (5 - result.score)
-    print(_c(f"  Score: [{score_bar}] {result.score}/5  ", _CYAN) +
-          _c(f"Confidence: {result.confidence:.0%}", _YELLOW) +
-          _c(f"  Candles: {result.candles_analyzed}", _GREY))
+    logger.info(
+        _c(f"  Score: [{score_bar}] {result.score}/5  ", _CYAN) +
+        _c(f"Confidence: {result.confidence:.0%}", _YELLOW) +
+        _c(f"  Candles: {result.candles_analyzed}", _GREY)
+    )
 
     if verbose and result.signals:
-        print(_c("  Signals:", _BLUE))
+        logger.info(_c("  Signals:", _BLUE))
         for sig in result.signals:
             if getattr(sig, "is_veto", False):
                 icon = "✓" if sig.passed else "🛑"
                 col = _GREY if sig.passed else _RED
                 status = "PASS" if sig.passed else "VETO FAILED"
                 detail_str = "  ".join(f"{k}={v}" for k, v in sig.detail.items())
-                print(
+                logger.info(
                     _c(f"    {icon} {sig.name:<32}", col) +
                     _c(f"[{status}]  {detail_str}", col)
                 )
@@ -98,44 +111,46 @@ def print_result(result: TrendResult, verbose: bool = None):
                 icon = "✓" if sig.passed else "✗"
                 col = _GREEN if sig.passed else _GREY
                 detail_str = "  ".join(f"{k}={v}" for k, v in sig.detail.items())
-                print(
+                logger.info(
                     _c(f"    {icon} {sig.name:<32}", col) +
                     _c(f"score={sig.score:.0%}  {detail_str}", _GREY)
                 )
 
     if result.vlm_verdict:
         vlm_col = _GREEN if "uptrend" in result.vlm_verdict else _RED
-        print(_c(f"  🤖 VLM ({CFG.vlm.model}): {result.vlm_verdict}", vlm_col) +
-              (f"  conf={result.vlm_confidence:.0%}" if result.vlm_confidence else ""))
+        logger.info(
+            _c(f"  🤖 VLM ({CFG.vlm.model}): {result.vlm_verdict}", vlm_col) +
+            (f"  conf={result.vlm_confidence:.0%}" if result.vlm_confidence else "")
+        )
 
     if result.chart_1h_path:
-        print(_c(f"  📊 Chart: {result.chart_1h_path}", _CYAN))
+        logger.info(_c(f"  📊 Chart: {result.chart_1h_path}", _CYAN))
 
-    print(_c(border, border_color))
-    print()
+    logger.info(_c(border, border_color))
+    logger.info("")
 
 
 def print_scan_header(tickers: List[str], timeframes: List[str], n_candles: int):
     """Print a formatted scan start banner."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print()
-    print(_c("═" * 60, _CYAN))
-    print(_c("  🔍  iTrade Agentic Trend Scanner", _CYAN + _BOLD))
-    print(_c(f"  {now}", _GREY))
-    print(_c(f"  Tickers:    {', '.join(tickers)}", _BLUE))
-    print(_c(f"  Timeframes: {', '.join(timeframes)}", _BLUE))
-    print(_c(f"  Data Fetch: {n_candles} candles maximum per timeframe", _BLUE))
-    
+    logger.info("")
+    logger.info(_c("═" * 60, _CYAN))
+    logger.info(_c("  🔍  iTrade Agentic Trend Scanner", _CYAN + _BOLD))
+    logger.info(_c(f"  {now}", _GREY))
+    logger.info(_c(f"  Tickers:    {', '.join(tickers)}", _BLUE))
+    logger.info(_c(f"  Timeframes: {', '.join(timeframes)}", _BLUE))
+    logger.info(_c(f"  Data Fetch: {n_candles} candles maximum per timeframe", _BLUE))
+
     cfg = CFG.trend
     analysis_strs = []
     if "1m" in timeframes: analysis_strs.append(f"1m={cfg.analysis_window_1m}")
     if "1h" in timeframes: analysis_strs.append(f"1h={cfg.analysis_window_1h}")
     other_tfs = [t for t in timeframes if t not in ("1m", "1h")]
     if other_tfs: analysis_strs.append(f"others={cfg.analysis_window}")
-    
-    print(_c(f"  Analysis:   {', '.join(analysis_strs)} candles per scan", _YELLOW))
-    print(_c("═" * 60, _CYAN))
-    print()
+
+    logger.info(_c(f"  Analysis:   {', '.join(analysis_strs)} candles per scan", _YELLOW))
+    logger.info(_c("═" * 60, _CYAN))
+    logger.info("")
 
 
 def print_scan_summary(results: List[TrendResult]):
@@ -145,22 +160,22 @@ def print_scan_summary(results: List[TrendResult]):
     vetoed     = [r for r in results if getattr(r, "veto_killed", False)]
     no_trends  = [r for r in results if r.direction == "none" and not getattr(r, "veto_killed", False)]
 
-    print()
-    print(_c("─" * 60, _GREY))
-    print(_c("  📋  SCAN SUMMARY", _BOLD))
-    print(_c(f"  Total scanned : {len(results)}", _GREY))
-    print(_c(f"  🚀 Uptrends   : {len(uptrends)}", _GREEN))
-    print(_c(f"  🔻 Downtrends : {len(downtrends)}", _RED))
-    print(_c(f"  🛑 Vetoed     : {len(vetoed)} (false positives killed)", _YELLOW))
-    print(_c(f"  ➡️  No trend   : {len(no_trends)}", _GREY))
+    logger.info("")
+    logger.info(_c("─" * 60, _GREY))
+    logger.info(_c("  📋  SCAN SUMMARY", _BOLD))
+    logger.info(_c(f"  Total scanned : {len(results)}", _GREY))
+    logger.info(_c(f"  🚀 Uptrends   : {len(uptrends)}", _GREEN))
+    logger.info(_c(f"  🔻 Downtrends : {len(downtrends)}", _RED))
+    logger.info(_c(f"  🛑 Vetoed     : {len(vetoed)} (false positives killed)", _YELLOW))
+    logger.info(_c(f"  ➡️  No trend   : {len(no_trends)}", _GREY))
 
     if uptrends or downtrends:
-        print(_c("\n  DETECTED TRENDS:", _BOLD))
+        logger.info(_c("\n  DjpgETECTED TRENDS:", _BOLD))
         for r in uptrends + downtrends:
-            print(_c(f"    {r.emoji} {r.ticker:<12} {r.timeframe:<4}  {r.direction_label:<10}  [{r.score}/5]", _BOLD))
+            logger.info(_c(f"    {r.emoji} {r.ticker:<12} {r.timeframe:<4}  {r.direction_label:<10}  [{r.score}/5]", _BOLD))
 
-    print(_c("─" * 60, _GREY))
-    print()
+    logger.info(_c("─" * 60, _GREY))
+    logger.info("")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

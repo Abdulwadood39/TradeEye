@@ -13,9 +13,12 @@ Produces:
 """
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from typing import Optional, List
+
+logger = logging.getLogger(__name__)
 
 import matplotlib
 matplotlib.use("Agg")
@@ -69,7 +72,7 @@ def generate_chart(
         path = _draw_trend_chart(plot_df, result, timeframe, cfg)
         return path
     except Exception as e:
-        print(f"  [WARN] Chart generation failed for {result.ticker}: {e}")
+        logger.warning(f"  [WARN] Chart generation failed for {result.ticker}: {e}")
         return None
 
 
@@ -165,7 +168,7 @@ def _draw_trend_chart(
     os.makedirs(cfg.output_dir, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     direction_tag = result.direction.upper()
-    fname = f"{result.ticker.replace('/', '_')}_{direction_tag}_{timeframe}_{ts}.png"
+    fname = f"{result.ticker.replace('/', '_')}_{direction_tag}.png"
     save_path = os.path.join(cfg.output_dir, fname)
 
     plt.tight_layout(rect=[0, 0, 1, 0.94])
