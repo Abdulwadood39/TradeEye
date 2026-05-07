@@ -95,6 +95,9 @@ def print_result(result: TrendResult, verbose: bool = None):
         _c(f"  Candles: {result.candles_analyzed}", _GREY)
     )
 
+    if result.veto_killed:
+        print(_c(f"  ⚡ VETOED by: {', '.join(result.vetoes_failed)}", _YELLOW + _BOLD))
+
     if verbose and result.signals:
         logger.info(_c("  Signals:", _BLUE))
         for sig in result.signals:
@@ -168,6 +171,9 @@ def print_scan_summary(results: List[TrendResult]):
     logger.info(_c(f"  🔻 Downtrends : {len(downtrends)}", _RED))
     logger.info(_c(f"  🛑 Vetoed     : {len(vetoed)} (false positives killed)", _YELLOW))
     logger.info(_c(f"  ➡️  No trend   : {len(no_trends)}", _GREY))
+
+    vetoed = [r for r in results if r.veto_killed]
+    print(_c(f"  ⚡ Veto-killed  : {len(vetoed)}", _YELLOW))
 
     if uptrends or downtrends:
         logger.info(_c("\n  DjpgETECTED TRENDS:", _BOLD))

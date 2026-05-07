@@ -126,14 +126,35 @@ class TrendConfig:
     # Both high-pivot and low-pivot regression lines must slope same direction
     channel_slope_min_bps: float = 0.15   # normalized, same as slope_min_bps
 
+    # === VETO Signal A: R-squared Linearity Gate ===
+    # R² of close prices vs regression line — low R² = noisy/sideways, not a clean trend
+    # Must exceed this threshold for a trend to be confirmed (hard veto)
+    r2_min_threshold: float = 0.35       # 0.0–1.0; strong trends often reach 0.5–0.8
+
+    # === VETO Signal B: ATR Consolidation Filter ===
+    # Ratio of net directional move to (ATR × n_candles). Low ratio = sideways chop.
+    # net_move / (atr × window) must exceed this for a trend to be valid
+    atr_move_ratio_min: float = 0.08     # markets moving less than 8% of potential range = sideways
+    atr_period: int = 14
+
+    # === Signal 6: Dynamic Trendline Touch Validator ===
+    # Ascending support (up) or descending resistance (down) must have ≥ N distinct pivot touches
+    trendline_min_touches: int = 3
+    # Max % distance from trendline for a bar to count as a "touch"
+    trendline_touch_pct: float = 0.5     # within 0.5% of the trendline price
+
     # === Scoring ===
-    # Minimum signals that must pass to declare a trend (out of 5)
+    # Minimum core signals (1–5) that must pass — vetoes are checked separately
     min_signals_for_trend: int = 3
 
     # Candle window to run signals over (use last N candles of fetched data)
     analysis_window_1h: int = 2500    # 21 trading days
     analysis_window_1m: int = 2500    # ~3.5 intraday hours
     analysis_window: int = 3000      # Fallback
+
+    # Timeframe-specific analysis windows
+    analysis_window_1m: int = 500        # 1m: use last 500 candles for signals (≈8hrs)
+    analysis_window_1h: int = 2000       # 1h: use last 2000 candles
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -158,13 +179,17 @@ class ChartConfig:
     subtext:    str = "#8b949e"
     bull:       str = "#3fb950"
     bear:       str = "#f85149"
-    up_channel: str = "#58a6ff"
-    dn_channel: str = "#ff7b72"
-    pivot_hi:   str = "#ffa657"
-    pivot_lo:   str = "#7ee787"
-    slope_line: str = "#d2a8ff"
-    signal_ok:  str = "#3fb950"
-    signal_fail:str = "#f85149"
+    up_channel:       str = "#58a6ff"
+    dn_channel:       str = "#ff7b72"
+    pivot_hi:         str = "#ffa657"
+    pivot_lo:         str = "#7ee787"
+    slope_line:       str = "#d2a8ff"
+    signal_ok:        str = "#3fb950"
+    signal_fail:      str = "#f85149"
+    trendline_up:     str = "#00d4aa"   # Ascending support trendline
+    trendline_dn:     str = "#ff6b6b"   # Descending resistance trendline
+    trendline_touch:  str = "#ffd700"   # Touch point markers
+    consolidation:    str = "#8b949e"   # Sideways / no-trend colour
 
 
 # ─────────────────────────────────────────────────────────────────────────────
