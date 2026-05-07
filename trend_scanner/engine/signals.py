@@ -41,7 +41,6 @@ class SignalResult:
     score: float        # 0.0–1.0
     is_veto: bool = False
     detail: Dict[str, Any] = field(default_factory=dict)
-    is_veto: bool = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -77,11 +76,6 @@ def signal_linreg_slope(df: pd.DataFrame) -> SignalResult:
 def signal_mann_kendall(df: pd.DataFrame) -> SignalResult:
     close = df["close"].values.astype(np.float64)
 
-    if len(close) > 300:
-        # Subsample to 150 evenly spaced points to avoid over-powered p-values
-        idx = np.linspace(0, len(close) - 1, 150, dtype=int)
-        close = close[idx]
-
     try:
         import pymannkendall as mk
         res       = mk.original_test(close)
@@ -100,11 +94,8 @@ def signal_mann_kendall(df: pd.DataFrame) -> SignalResult:
         elif "decreasing" in str(trend_str):
             direction = "down"
 
-    TAU_MIN = 0.25
-    passed = is_significant and direction != "none" and abs(float(tau)) >= TAU_MIN
-
-    # Score based on how far below alpha the p-value is (stronger = lower p)
-    score = min(1.0 - p_value, 1.0) if is_significant else 0.0
+    passed = is_sig and direction != "none"
+    score  = min(1.0 - p_value, 1.0) if is_sig else 0.0
 
     return SignalResult(
         name="Mann-Kendall", passed=passed, direction=direction,
@@ -346,59 +337,77 @@ def veto_atr_consolidation(df: pd.DataFrame) -> SignalResult:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# VETO GATES
+# VETO V3 — Trend Break Detector
+# Rejects trends where price has broken the support/resistance channel
 # ─────────────────────────────────────────────────────────────────────────────
 
-def veto_r2_linearity(df: pd.DataFrame, min_r2: float = 0.55) -> SignalResult:
-    close = df["close"].values
-    x = np.arange(len(close), dtype=np.float64)
-    slope, intercept = np.polyfit(x, close, 1)
-    predicted = slope * x + intercept
-    ss_res = np.sum((close - predicted) ** 2)
-    ss_tot = np.sum((close - np.mean(close)) ** 2)
-    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-    passed = r2 >= min_r2
-    return SignalResult(name="R² Linearity", passed=passed, direction="none", 
-                        score=r2, detail={"r2": round(r2, 4)}, is_veto=True)
+def veto_trend_break(df: pd.DataFrame, direction: str) -> SignalResult:
+    """
+    For an uptrend: checks that close never closes below the ascending
+    support trendline (fitted through swing lows) by more than a tolerance.
 
-def _compute_atr(df: pd.DataFrame, period: int = 14) -> float:
-    high = df["high"].values
-    low = df["low"].values
-    close = df["close"].values
-    n = len(high)
-    if n < period + 1:
-        return 0.0
-    tr = np.zeros(n)
-    for i in range(1, n):
-        hl = high[i] - low[i]
-        hpc = abs(high[i] - close[i - 1])
-        lpc = abs(low[i] - close[i - 1])
-        tr[i] = max(hl, hpc, lpc)
-    return float(np.mean(tr[-period:]))
+    For a downtrend: checks that close never closes above the descending
+    resistance trendline (fitted through swing highs) by more than tolerance.
 
-def veto_atr_consolidation(df: pd.DataFrame, period: int = 14, window: int = 250) -> SignalResult:
-    recent_df = df.iloc[-window:] if len(df) > window else df
-    atr = _compute_atr(recent_df, period)
-    close = recent_df["close"].values
-    net_move = abs(close[-1] - close[0])
-    total_atr = atr * len(recent_df)  # sum of all ATR bars (approx)
-    efficiency_ratio = net_move / total_atr if total_atr > 0 else 0.0
-    passed = efficiency_ratio >= 0.02
-    return SignalResult(name="ATR Efficiency", passed=passed, direction="none",
-                        score=efficiency_ratio, detail={"efficiency_ratio": round(efficiency_ratio, 4)},
-                        is_veto=True)
+    If the trend has broken structurally in the last 20% of bars → veto.
+    """
+    if direction == "none":
+        return SignalResult(
+            name="Trend Break", passed=True, direction="none",
+            score=1.0, is_veto=True,
+            detail={"reason": "no direction to check"},
+        )
 
-def veto_trend_break(df: pd.DataFrame, direction: str, lookback: int = 50) -> SignalResult:
-    recent = df.iloc[-lookback:]
-    pivot_hi, pivot_lo = get_pivots(recent, order=3)
-    passed = True
-    if direction == "up" and len(pivot_lo) >= 2:
-        lo_prices = recent["low"].values[pivot_lo]
-        if lo_prices[-1] < lo_prices[-2]:
-            passed = False
-    elif direction == "down" and len(pivot_hi) >= 2:
-        hi_prices = recent["high"].values[pivot_hi]
-        if hi_prices[-1] > hi_prices[-2]:
-            passed = False
-    return SignalResult(name="Trend Break", passed=passed, direction="none",
-                        score=1.0 if passed else 0.0, detail={}, is_veto=True)
+    pivot_hi, pivot_lo = get_pivots(df, order=CFG.trend.pivot_order)
+    n = len(df)
+    close = df["close"].values.astype(np.float64)
+    mean_price = float(np.mean(close))
+
+    # Look at last 20% of bars for recent breaks
+    check_from = int(n * 0.80)
+
+    if direction == "up":
+        if len(pivot_lo) < 3:
+            # Not enough pivots to draw a trendline — benefit of the doubt
+            return SignalResult(
+                name="Trend Break", passed=True, direction=direction,
+                score=0.8, is_veto=True,
+                detail={"reason": "insufficient pivots"},
+            )
+        lo_prices = df["low"].values[pivot_lo].astype(np.float64)
+        coeffs    = np.polyfit(pivot_lo.astype(float), lo_prices, 1)
+        # Tolerance: 1.5% below trendline = break
+        tolerance = mean_price * 0.015
+        broken_bars = 0
+        for i in range(check_from, n):
+            tl_val = np.polyval(coeffs, float(i))
+            if close[i] < tl_val - tolerance:
+                broken_bars += 1
+        # If more than 3 bars broke below support → trend is broken
+        passed = broken_bars <= 3
+
+    else:  # down
+        if len(pivot_hi) < 3:
+            return SignalResult(
+                name="Trend Break", passed=True, direction=direction,
+                score=0.8, is_veto=True,
+                detail={"reason": "insufficient pivots"},
+            )
+        hi_prices = df["high"].values[pivot_hi].astype(np.float64)
+        coeffs    = np.polyfit(pivot_hi.astype(float), hi_prices, 1)
+        tolerance = mean_price * 0.015
+        broken_bars = 0
+        for i in range(check_from, n):
+            tl_val = np.polyval(coeffs, float(i))
+            if close[i] > tl_val + tolerance:
+                broken_bars += 1
+        passed = broken_bars <= 3
+
+    score = 1.0 if passed else 0.0
+    check_n = n - check_from
+
+    return SignalResult(
+        name="Trend Break", passed=passed, direction=direction,
+        score=score, is_veto=True,
+        detail={"broken_bars": broken_bars, "checked_bars": check_n},
+    )

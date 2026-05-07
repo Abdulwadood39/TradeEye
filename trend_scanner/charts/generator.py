@@ -11,12 +11,9 @@ Fixes:
 """
 from __future__ import annotations
 
-import logging
 import os
 from datetime import datetime
 from typing import Optional
-
-logger = logging.getLogger(__name__)
 
 import matplotlib
 matplotlib.use("Agg")
@@ -48,14 +45,23 @@ def generate_chart(
         return None
     cfg = chart_cfg or CFG.chart
 
-    # Limit to exactly what the engine analyzed
-    window = result.candles_analyzed if result.candles_analyzed > 0 else min(CFG.trend.analysis_window, len(df))
+    # Timeframe-aware window for chart (match what the engine analyzed)
+    tf = timeframe.lower()
+    if tf == "1m":
+        window = min(CFG.trend.analysis_window_1m, len(df))
+    elif tf in ("1h", "2h", "4h"):
+        window = min(CFG.trend.analysis_window_1h, len(df))
+    else:
+        window = min(CFG.trend.analysis_window, len(df))
+
     plot_df = df.iloc[-window:].reset_index(drop=True)
 
     try:
         return _draw_chart(plot_df, result, timeframe, cfg)
     except Exception as e:
-        logger.warning(f"  [WARN] Chart generation failed for {result.ticker}: {e}")
+        import traceback
+        print(f"  [WARN] Chart generation failed ({result.ticker} {timeframe}): {e}")
+        traceback.print_exc()
         return None
 
 
@@ -86,28 +92,12 @@ def _draw_chart(df: pd.DataFrame, result: TrendResult, timeframe: str, cfg: Char
     # We map readable time labels back onto bar indices as ticks.
     xs = np.arange(n, dtype=np.float64)
 
-    # ── Build x-axis positions ───────────────────────────────────────────────
-    xs = np.arange(len(df), dtype=np.float64)
-    use_dates = "datetime" in df.columns
+    has_dt = "datetime" in df.columns and pd.api.types.is_datetime64_any_dtype(df["datetime"])
 
-    if use_dates:
-        # Create a mapping from index to datetime string
-        dt_values = pd.to_datetime(df["datetime"].values)
-        
-        def format_date(x, pos):
-            idx = int(np.clip(round(x), 0, len(df) - 1))
-            return dt_values[idx].strftime("%b %d\n%H:%M")
-            
-        def format_date_vol(x, pos):
-            idx = int(np.clip(round(x), 0, len(df) - 1))
-            return dt_values[idx].strftime("%b %d")
-
-        ax_main.xaxis.set_major_formatter(plt.FuncFormatter(format_date))
-        ax_vol.xaxis.set_major_formatter(plt.FuncFormatter(format_date_vol))
-        
-        num_ticks = min(8, len(df))
-        ax_main.xaxis.set_major_locator(plt.MaxNLocator(num_ticks))
-        ax_vol.xaxis.set_major_locator(plt.MaxNLocator(num_ticks))
+    if has_dt:
+        _set_time_ticks(ax_main, ax_vol, df["datetime"].values, n, tf)
+    else:
+        ax_vol.set_xlabel("Bar #", color=cfg.subtext, fontsize=7)
 
     # ── Candlesticks (vectorized) ─────────────────────────────────────────────
     _draw_candles_fast(ax_main, df, xs, cfg)
@@ -151,10 +141,10 @@ def _draw_chart(df: pd.DataFrame, result: TrendResult, timeframe: str, cfg: Char
 
     # ── Save ─────────────────────────────────────────────────────────────────
     os.makedirs(cfg.output_dir, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    direction_tag = result.direction.upper()
-    fname = f"{result.ticker.replace('/', '_')}_{direction_tag}.png"
-    save_path = os.path.join(cfg.output_dir, fname)
+    ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tag   = result.direction.upper()
+    fname = f"{result.ticker.replace('/', '_').replace('=','_')}_{tag}_{timeframe}_{ts}.png"
+    path  = os.path.abspath(os.path.join(cfg.output_dir, fname))
 
     plt.tight_layout(rect=[0, 0, 1, 0.93])
     fig.savefig(path, dpi=cfg.dpi, bbox_inches="tight", facecolor=cfg.bg)
@@ -166,41 +156,67 @@ def _draw_chart(df: pd.DataFrame, result: TrendResult, timeframe: str, cfg: Char
 # DRAWING HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _draw_candles(ax, df: pd.DataFrame, xs: np.ndarray, cfg: ChartConfig):
-    """Draw candlestick wicks and bodies (vectorized)."""
-    n = len(df)
-    if n < 2:
-        return
+def _set_time_ticks(ax_main, ax_vol, datetimes, n: int, tf: str):
+    """Place readable time labels on the bottom axis using bar index."""
+    # Choose tick density based on candle count
+    if n <= 100:
+        n_ticks = 8
+    elif n <= 500:
+        n_ticks = 10
+    else:
+        n_ticks = 12
 
-    from matplotlib.collections import LineCollection, PolyCollection
+    tick_bars = np.linspace(0, n - 1, n_ticks, dtype=int)
+    dts = pd.to_datetime(datetimes)
 
-    width = 0.75
+    if tf == "1m":
+        fmt = "%H:%M\n%b %d"
+    elif tf in ("1h", "2h", "4h"):
+        fmt = "%b %d\n%H:%M"
+    else:
+        fmt = "%b %d\n%Y"
+
+    labels = [dts[i].strftime(fmt) for i in tick_bars]
+
+    for ax in (ax_main, ax_vol):
+        ax.set_xticks(tick_bars.astype(float))
+        ax.set_xticklabels(labels, fontsize=5.5, color="#8b949e")
+
+
+def _draw_candles_fast(ax, df: pd.DataFrame, xs: np.ndarray, cfg: ChartConfig):
+    """Vectorized candlestick drawing using LineCollection — fast for 2000+ bars."""
+    n      = len(df)
+    opens  = df["open"].values.astype(float)
+    highs  = df["high"].values.astype(float)
+    lows   = df["low"].values.astype(float)
+    closes = df["close"].values.astype(float)
+
+    bull_mask = closes >= opens
+    bear_mask = ~bull_mask
+
+    bar_w = max(0.4, 0.7 * (xs[1] - xs[0])) if n > 1 else 0.4
+
+    # Wicks
+    wick_segs  = [[(xs[i], lows[i]), (xs[i], highs[i])] for i in range(n)]
+    bull_wicks = [wick_segs[i] for i in range(n) if bull_mask[i]]
+    bear_wicks = [wick_segs[i] for i in range(n) if bear_mask[i]]
 
     if bull_wicks:
         ax.add_collection(LineCollection(bull_wicks, colors=cfg.bull, linewidths=0.6, zorder=2))
     if bear_wicks:
         ax.add_collection(LineCollection(bear_wicks, colors=cfg.bear, linewidths=0.6, zorder=2))
 
-    colors = [cfg.bull if c >= o else cfg.bear for o, c in zip(opens, closes)]
+    # Bodies
+    for i in range(n):
+        bot = min(opens[i], closes[i])
+        h   = max(abs(closes[i] - opens[i]), (highs[i] - lows[i]) * 0.003)
+        col = cfg.bull if bull_mask[i] else cfg.bear
+        ax.add_patch(Rectangle(
+            (xs[i] - bar_w / 2, bot), bar_w, h,
+            facecolor=col, edgecolor="none", zorder=3,
+        ))
 
-    # Wicks (lines)
-    wicks = [((x, l), (x, h)) for x, l, h in zip(xs, lows, highs)]
-    wick_col = LineCollection(wicks, colors=colors, linewidths=0.5, zorder=2)
-    ax.add_collection(wick_col)
-
-    # Bodies (rectangles)
-    bodies = []
-    for x, o, c, h, l in zip(xs, opens, closes, highs, lows):
-        body_bot = min(o, c)
-        body_h = max(abs(c - o), (h - l) * 0.005)
-        # Rectangle coordinates: (left, bottom), (right, bottom), (right, top), (left, top)
-        left = x - width / 2
-        right = x + width / 2
-        top = body_bot + body_h
-        bodies.append(((left, body_bot), (right, body_bot), (right, top), (left, top)))
-        
-    body_col = PolyCollection(bodies, facecolors=colors, edgecolors="none", zorder=3)
-    ax.add_collection(body_col)
+    ax.autoscale_view()
 
 
 def _draw_volume(ax, df: pd.DataFrame, xs: np.ndarray, cfg: ChartConfig):
