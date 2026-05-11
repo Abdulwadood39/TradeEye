@@ -17,6 +17,9 @@ load_dotenv()
 
 FOREX_TICKERS: List[str] = [
     'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'USDCHF=X', 'AUDUSD=X', 'NZDUSD=X', 'USDCAD=X',
+    'AUDPLN=X', 'HKDJPY=X', 'CADPLN=X', 'ZARJPY=X', 'EURYJPY=X', 'GBPDKK=X', 'AUDNOK=X', 
+    'NOKDKK=X', 'CHFNOK=X', 'GBPMXN=X', 'GBPPLN=X', 'EUDHKD=X', 'SGDHKD=X', 'AUDCNH=X',
+    'GBPHKD=X', 
     'EURGBP=X', 'EURJPY=X', 'EURCHF=X', 'EURAUD=X', 'EURNZD=X', 'EURCAD=X',
     'GBPJPY=X', 'GBPCHF=X', 'GBPAUD=X', 'GBPCAD=X', 'GBPNZD=X',
     'AUDJPY=X', 'AUDNZD=X', 'AUDCAD=X', 'AUDCHF=X',
@@ -51,10 +54,16 @@ DEFAULT_TICKERS: List[str] = [
     # Stocks
     "AAPL", "NVDA", "TSLA", "MSFT",
     # Crypto (yfinance format — auto-routed to CCXT Binance if CCXT source)
-    # "BTC-USD", "ETH-USD", "SOL-USD",
+    "BTC-USD", "ETH-USD", "SOL-USD",
     # Commodities
     "GC=F",   # Gold
     "CL=F",   # Crude Oil
+    "SI=F",   # Silver
+    "NG=F",   # Natural Gas
+    "HG=F",   # Copper
+    "LE=F",   # Live Cattle
+    "KC=F",   # Coffee
+    "CC=F",   # Cocoa
 ] + FOREX_TICKERS
 
 # Map yfinance-style crypto tickers → CCXT symbol (BTC-USD → BTC/USDT)
