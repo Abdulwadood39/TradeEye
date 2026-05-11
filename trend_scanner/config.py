@@ -39,7 +39,12 @@ FOREX_TICKERS: List[str] = [
     'USDTHB=X',
     'USDTWD=X',
     'USDILS=X',
-    'USDCLP=X'
+    'USDCLP=X',
+    "^N225",
+    "^GSPC",
+    "^GDAXI",
+    "^FTSE",
+    "^NDX"
 ]
 
 DEFAULT_TICKERS: List[str] = [
@@ -79,7 +84,7 @@ YFINANCE_TO_CCXT: Dict[str, str] = {
 @dataclass
 class DataConfig:
     # How many candles to analyse per timeframe
-    n_candles: int = 3000
+    n_candles: int = 2500
 
     # Timeframes to scan (yfinance interval strings)
     timeframes: List[str] = field(default_factory=lambda: ["1h", "1m"])
