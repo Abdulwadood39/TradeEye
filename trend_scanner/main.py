@@ -153,6 +153,9 @@ def run_parallel_scan(
         logger.info(f"  {len(tickers)} tickers  ·  {workers} workers  ·  {n_candles} candles")
         logger.info(f"{'═' * 60}")
         
+    # Clean up previous messages before starting the new scan
+    DISPATCHER.clear_discord_messages()
+        
     # Send Telegram notification about scan starting
     if len(tickers) <= 10:
         tickers_str = ", ".join(tickers)
@@ -369,6 +372,8 @@ def _parse_args():
                    help="Enable Telegram notifications for detected trends")
     p.add_argument("--discord", action="store_true",
                    help="Enable Discord notifications for detected trends")
+    p.add_argument("--discord-all", action="store_true",
+                   help="Enable Discord notifications for Vetoed scans")
     p.add_argument("--min-signals", type=int, default=None, metavar="N",
                    help=f"Minimum signals to declare a trend (1-5, default: {CFG.trend.min_signals_for_trend})")
     p.add_argument("--all", "-a", action="store_true", dest="print_all",
@@ -393,6 +398,8 @@ def main():
         CFG.notifications.telegram.enabled = True
     if args.discord:
         CFG.notifications.discord.enabled = True
+    if args.discord_all:
+        CFG.notifications.discord_all.enabled = True
 
     # ── VLM pre-flight ───────────────────────────────────────────────────────
     vlm_enabled = args.vlm

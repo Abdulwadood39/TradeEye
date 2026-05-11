@@ -225,9 +225,15 @@ class DiscordConfig:
     webhook_url: str = os.getenv("DISCORD_WEBHOOK_URL", "") # Your Discord Webhook URL
 
 @dataclass
+class DiscordAllConfig:
+    enabled: bool = False
+    webhook_url: str = os.getenv("DISCORD_ALL_WEBHOOK_URL", "") # Webhook URL for ALL scans
+
+@dataclass
 class NotificationsConfig:
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
+    discord_all: DiscordAllConfig = field(default_factory=DiscordAllConfig)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
