@@ -28,7 +28,7 @@ from trend_scanner.config import CFG, DEFAULT_TICKERS
 from trend_scanner.data.fetcher import fetch
 from trend_scanner.engine.trend_engine import TrendEngine, TrendResult
 from trend_scanner.charts.generator import generate_chart
-from trend_scanner.vlm.qwen_agent import verify_chart, check_vlm_available
+from trend_scanner.vlm.gemini_agent import verify_chart, check_vlm_available
 from trend_scanner.alerts.notifier import (
     print_result,
     print_scan_summary,
@@ -367,6 +367,8 @@ def _parse_args():
                    help="Enable Qwen2.5-VL visual verification (requires local Ollama)")
     p.add_argument("--telegram", action="store_true",
                    help="Enable Telegram notifications for detected trends")
+    p.add_argument("--discord", action="store_true",
+                   help="Enable Discord notifications for detected trends")
     p.add_argument("--min-signals", type=int, default=None, metavar="N",
                    help=f"Minimum signals to declare a trend (1-5, default: {CFG.trend.min_signals_for_trend})")
     p.add_argument("--all", "-a", action="store_true", dest="print_all",
@@ -389,6 +391,8 @@ def main():
         CFG.trend.min_signals_for_trend = args.min_signals
     if args.telegram:
         CFG.notifications.telegram.enabled = True
+    if args.discord:
+        CFG.notifications.discord.enabled = True
 
     # ── VLM pre-flight ───────────────────────────────────────────────────────
     vlm_enabled = args.vlm

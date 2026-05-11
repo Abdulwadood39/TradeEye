@@ -23,6 +23,8 @@ from trend_scanner.engine.signals import (
     veto_r2_linearity,
     veto_atr_consolidation,
     veto_trend_break,
+    veto_ema_alignment,
+    veto_sideways_body,
 )
 
 
@@ -168,11 +170,13 @@ class TrendEngine:
         veto_killed = False
 
         if direction != "none":
-            # Run Veto Gates
+            # Run Veto Gates (order matters: cheapest first)
             vetoes: List[SignalResult] = [
                 veto_r2_linearity(analysis_df),
                 veto_atr_consolidation(analysis_df),
-                veto_trend_break(analysis_df, direction)
+                veto_sideways_body(analysis_df),
+                veto_ema_alignment(analysis_df, direction),
+                veto_trend_break(analysis_df, direction),
             ]
             all_signals.extend(vetoes)
             

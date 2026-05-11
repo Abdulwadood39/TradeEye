@@ -107,33 +107,33 @@ class DataConfig:
 class TrendConfig:
     # === Signal 1: Linear Regression Slope ===
     # Minimum normalised slope (basis points per candle) to count as trending
-    slope_min_bps: float = 0.15
+    slope_min_bps: float = 0.20   # raised from 0.15 — must show clear directional drift
 
     # === Signal 2: Mann-Kendall Test ===
     mk_alpha: float = 0.05          # significance level
 
     # === Signal 3: ADX ===
     adx_period: int = 14
-    adx_threshold: float = 20.0     # ADX > this = trending market
+    adx_threshold: float = 25.0     # raised from 20 — requires a stronger established trend
 
     # === Signal 4: Higher Highs / Higher Lows (or LH/LL) ===
     # Pivot detection order (bars each side)
     pivot_order: int = 5
     # Minimum fraction of pivots that must show HH+HL (or LH+LL) structure
-    hh_hl_min_ratio: float = 0.50
+    hh_hl_min_ratio: float = 0.60   # raised from 0.50 — majority must agree
 
     # === Signal 5: Pivot Regression Channel ===
     # Both high-pivot and low-pivot regression lines must slope same direction
-    channel_slope_min_bps: float = 0.15   # normalized, same as slope_min_bps
+    channel_slope_min_bps: float = 0.20   # raised from 0.15 — consistent with slope_min_bps
 
     # === Scoring ===
     # Minimum signals that must pass to declare a trend (out of 5)
-    min_signals_for_trend: int = 3
+    min_signals_for_trend: int = 4   # raised from 3 — need stronger consensus
 
     # Candle window to run signals over (use last N candles of fetched data)
     analysis_window_1h: int = 2500    # 21 trading days
     analysis_window_1m: int = 2500    # ~3.5 intraday hours
-    analysis_window: int = 3000      # Fallback
+    analysis_window: int = 2500      # Fallback
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -174,10 +174,10 @@ class ChartConfig:
 @dataclass
 class VLMConfig:
     enabled: bool = False
-    model: str = "qwen3.5:4b"
-    timeout: int = 120       # seconds to wait for Ollama response
-    # Only run VLM when math score >= this (avoid wasting time on weak signals)
-    min_score_to_verify: int = 3
+    model: str = "gemini-3-flash-preview"    # free tier, vision-capable
+    timeout: int = 30                  # seconds
+    # Only run VLM when math score >= this (avoid wasting API calls on weak signals)
+    min_score_to_verify: int = 4
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -206,8 +206,14 @@ class TelegramConfig:
     chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")        # Your Telegram Chat ID
 
 @dataclass
+class DiscordConfig:
+    enabled: bool = False
+    webhook_url: str = os.getenv("DISCORD_WEBHOOK_URL", "") # Your Discord Webhook URL
+
+@dataclass
 class NotificationsConfig:
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
+    discord: DiscordConfig = field(default_factory=DiscordConfig)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

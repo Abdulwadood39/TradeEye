@@ -354,7 +354,7 @@ def signal_pivot_channel(df: pd.DataFrame) -> SignalResult:
 # VETO GATES
 # ─────────────────────────────────────────────────────────────────────────────
 
-def veto_r2_linearity(df: pd.DataFrame, min_r2: float = 0.55) -> SignalResult:
+def veto_r2_linearity(df: pd.DataFrame, min_r2: float = 0.65) -> SignalResult:
     close = df["close"].values
     x = np.arange(len(close), dtype=np.float64)
     slope, intercept = np.polyfit(x, close, 1)
@@ -363,7 +363,7 @@ def veto_r2_linearity(df: pd.DataFrame, min_r2: float = 0.55) -> SignalResult:
     ss_tot = np.sum((close - np.mean(close)) ** 2)
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
     passed = r2 >= min_r2
-    return SignalResult(name="R² Linearity", passed=passed, direction="none", 
+    return SignalResult(name="R² Linearity", passed=passed, direction="none",
                         score=r2, detail={"r2": round(r2, 4)}, is_veto=True)
 
 def _compute_atr(df: pd.DataFrame, period: int = 14) -> float:
@@ -386,9 +386,10 @@ def veto_atr_consolidation(df: pd.DataFrame, period: int = 14, window: int = 250
     atr = _compute_atr(recent_df, period)
     close = recent_df["close"].values
     net_move = abs(close[-1] - close[0])
-    total_atr = atr * len(recent_df)  # sum of all ATR bars (approx)
+    total_atr = atr * len(recent_df)
     efficiency_ratio = net_move / total_atr if total_atr > 0 else 0.0
-    passed = efficiency_ratio >= 0.02
+    # Raised from 0.02 → 0.035 to be more selective against sideways chop
+    passed = efficiency_ratio >= 0.035
     return SignalResult(name="ATR Efficiency", passed=passed, direction="none",
                         score=efficiency_ratio, detail={"efficiency_ratio": round(efficiency_ratio, 4)},
                         is_veto=True)
@@ -407,3 +408,74 @@ def veto_trend_break(df: pd.DataFrame, direction: str, lookback: int = 50) -> Si
             passed = False
     return SignalResult(name="Trend Break", passed=passed, direction="none",
                         score=1.0 if passed else 0.0, detail={}, is_veto=True)
+
+
+def veto_ema_alignment(df: pd.DataFrame, direction: str,
+                       fast_period: int = 50, slow_period: int = 200) -> SignalResult:
+    """
+    Veto if price is not aligned with both EMA-50 and EMA-200.
+    For an uptrend: close must be above both EMAs.
+    For a downtrend: close must be below both EMAs.
+    Requires at least slow_period candles to be meaningful.
+    """
+    close = df["close"].values.astype(np.float64)
+    if len(close) < slow_period:
+        # Not enough data — skip this veto (do not block)
+        return SignalResult(name="EMA Alignment", passed=True, direction="none",
+                            score=1.0, detail={"skipped": "not enough candles"}, is_veto=True)
+
+    def ema(series, period):
+        s = pd.Series(series)
+        return float(s.ewm(span=period, adjust=False).mean().iloc[-1])
+
+    ema_fast = ema(close, fast_period)
+    ema_slow = ema(close, slow_period)
+    last_close = close[-1]
+
+    if direction == "up":
+        passed = last_close > ema_fast and last_close > ema_slow
+    elif direction == "down":
+        passed = last_close < ema_fast and last_close < ema_slow
+    else:
+        passed = True
+
+    return SignalResult(
+        name="EMA Alignment",
+        passed=passed,
+        direction="none",
+        score=1.0 if passed else 0.0,
+        detail={"ema_fast": round(ema_fast, 4), "ema_slow": round(ema_slow, 4), "close": round(last_close, 4)},
+        is_veto=True,
+    )
+
+
+def veto_sideways_body(df: pd.DataFrame, window: int = 100,
+                        min_body_ratio: float = 0.35) -> SignalResult:
+    """
+    Veto if the majority of recent candles are doji / spinning-tops (tiny body).
+    This catches sideways congestion that passes other signals but looks like chop.
+
+    Body ratio = abs(close - open) / (high - low).
+    If the *median* body ratio across the last `window` candles is below
+    `min_body_ratio`, the market is mostly indecisive — reject it.
+    """
+    recent = df.iloc[-window:] if len(df) > window else df
+
+    candle_range = (recent["high"] - recent["low"]).values
+    body = (recent["close"] - recent["open"]).abs().values
+
+    # Avoid division by zero (flat candles)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratios = np.where(candle_range > 0, body / candle_range, 0.0)
+
+    median_ratio = float(np.median(ratios))
+    passed = median_ratio >= min_body_ratio
+
+    return SignalResult(
+        name="Body Ratio",
+        passed=passed,
+        direction="none",
+        score=median_ratio,
+        detail={"median_body_ratio": round(median_ratio, 4)},
+        is_veto=True,
+    )

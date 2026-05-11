@@ -106,6 +106,72 @@ class TelegramPlatform(BasePlatform):
         return success
 
 
+class DiscordPlatform(BasePlatform):
+    """Sends trend alerts to a Discord webhook."""
+
+    def __init__(self, webhook_url: str):
+        self.webhook_url = webhook_url
+
+    def send_alert(self, result: TrendResult) -> bool:
+        if not self.webhook_url:
+            logger.warning("  ⚠️  Discord webhook_url missing. Cannot send alert.")
+            return False
+
+        message = (
+            f"**{result.emoji} {result.direction_label} Alert: {result.ticker}**\n"
+            f"• Timeframe: {result.timeframe}\n"
+            f"• Score: {result.score}/5\n"
+            f"• Confidence: {result.confidence:.0%}\n"
+        )
+        
+        if result.vlm_verdict:
+            message += f"• VLM: {result.vlm_verdict}\n"
+
+        success = True
+        chart_path = getattr(result, "chart_1h_path", None) or getattr(result, "chart_1d_path", None)
+        
+        try:
+            if chart_path:
+                with open(chart_path, 'rb') as photo:
+                    resp = requests.post(
+                        self.webhook_url,
+                        data={"content": message},
+                        files={"file": photo},
+                        timeout=30
+                    )
+            else:
+                resp = requests.post(
+                    self.webhook_url,
+                    json={"content": message},
+                    timeout=30
+                )
+            
+            resp.raise_for_status()
+            logger.info(f"  📩 Discord alert sent for {result.ticker} [{result.timeframe}]")
+        except Exception as e:
+            logger.error(f"  ❌ Failed to send Discord alert: {e}")
+            success = False
+            
+        return success
+
+    def send_message(self, text: str) -> bool:
+        if not self.webhook_url:
+            return False
+
+        try:
+            resp = requests.post(
+                self.webhook_url,
+                json={"content": text},
+                timeout=30
+            )
+            resp.raise_for_status()
+            logger.info("  📩 Discord message sent")
+            return True
+        except Exception as e:
+            logger.error(f"  ❌ Failed to send Discord message: {e}")
+            return False
+
+
 class AlertDispatcher:
     """Manages dispatching alerts to all configured platforms."""
 
@@ -128,6 +194,11 @@ class AlertDispatcher:
                 self._platforms.append(TelegramPlatform(
                     token=CFG.notifications.telegram.bot_token,
                     chat_id=CFG.notifications.telegram.chat_id,
+                ))
+            # Register Discord if enabled
+            if CFG.notifications.discord.enabled:
+                self._platforms.append(DiscordPlatform(
+                    webhook_url=CFG.notifications.discord.webhook_url,
                 ))
 
         self._initialized = True

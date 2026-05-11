@@ -15,5 +15,11 @@ pandas_ta>=0.3.14b0
 # Charting
 matplotlib>=3.9.0
 
-# Optional VLM
+# Ollama
 ollama>=0.3.0
+
+# Alerts
+requests>=2.32.0
+
+# Optional VLM (Google Gemini — free tier)
+google-generativeai>=0.7.0
