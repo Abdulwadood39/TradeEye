@@ -154,7 +154,7 @@ def run_parallel_scan(
         logger.info(f"{'═' * 60}")
         
     # Clean up previous messages before starting the new scan
-    DISPATCHER.clear_discord_messages()
+    DISPATCHER.clear_discord_messages(timeframe=timeframe)
         
     # Send Telegram notification about scan starting
     if len(tickers) <= 10:
@@ -167,7 +167,7 @@ def run_parallel_scan(
         f"Scanning {len(tickers)} tickers ({tickers_str}) "
         f"analyzing the last {n_candles} candles."
     )
-    dispatch_text_message(start_message)
+    dispatch_text_message(start_message, timeframe=timeframe)
 
     results: List[TrendResult] = []
 

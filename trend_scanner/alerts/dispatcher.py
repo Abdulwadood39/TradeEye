@@ -24,7 +24,7 @@ class BasePlatform(ABC):
         pass
 
     @abstractmethod
-    def send_message(self, text: str) -> bool:
+    def send_message(self, text: str, timeframe: str = None) -> bool:
         """Send a plain text message to the platform. Returns True if successful."""
         pass
 
@@ -83,7 +83,7 @@ class TelegramPlatform(BasePlatform):
                 
         return success
 
-    def send_message(self, text: str) -> bool:
+    def send_message(self, text: str, timeframe: str = None) -> bool:
         if not self.token or not self.chat_ids:
             return False
 
@@ -161,7 +161,7 @@ class DiscordPlatform(BasePlatform):
                     import os
                     os.makedirs(os.path.dirname(self.msg_ids_file), exist_ok=True)
                     with open(self.msg_ids_file, "a") as f:
-                        f.write(f"{self.webhook_url}|{msg_id}\n")
+                        f.write(f"{self.webhook_url}|{msg_id}|{result.timeframe}\n")
             except Exception as e:
                 logger.warning(f"  ⚠️ Could not save Discord message ID: {e}")
 
@@ -172,7 +172,7 @@ class DiscordPlatform(BasePlatform):
             
         return success
 
-    def send_message(self, text: str) -> bool:
+    def send_message(self, text: str, timeframe: str = None) -> bool:
         if not self.webhook_url:
             return False
 
@@ -191,7 +191,8 @@ class DiscordPlatform(BasePlatform):
                     import os
                     os.makedirs(os.path.dirname(self.msg_ids_file), exist_ok=True)
                     with open(self.msg_ids_file, "a") as f:
-                        f.write(f"{self.webhook_url}|{msg_id}\n")
+                        tf_str = f"|{timeframe}" if timeframe else ""
+                        f.write(f"{self.webhook_url}|{msg_id}{tf_str}\n")
             except Exception as e:
                 pass
 
@@ -263,13 +264,13 @@ class AlertDispatcher:
         if is_valid_trend:
             self._last_alerted[key] = time.monotonic()
 
-    def dispatch_message(self, text: str):
+    def dispatch_message(self, text: str, timeframe: str = None):
         """Dispatch a plain text message to all registered communication platforms."""
         self._initialize_platforms()
         for platform in self._platforms:
-            platform.send_message(text)
+            platform.send_message(text, timeframe)
             
-    def clear_discord_messages(self):
+    def clear_discord_messages(self, timeframe: str = None):
         """Delete all previously sent Discord messages to clean up the channel."""
         import os
         msg_ids_file = "trend_scanner/output/discord_msg_ids.txt"
@@ -283,24 +284,36 @@ class AlertDispatcher:
             if not lines:
                 return
                 
-            logger.info(f"  🧹 Cleaning up {len(lines)} previous Discord messages...")
+            logger.info(f"  🧹 Cleaning up previous Discord messages for timeframe {timeframe}...")
+            
+            kept_lines = []
             
             for line in lines:
                 line = line.strip()
                 if not line or "|" not in line:
                     continue
-                webhook_url, msg_id = line.split("|", 1)
+                
+                parts = line.split("|")
+                webhook_url = parts[0]
+                msg_id = parts[1]
+                msg_tf = parts[2] if len(parts) > 2 else None
+                
+                if timeframe and msg_tf and msg_tf != timeframe:
+                    # Keep messages from other timeframes
+                    kept_lines.append(line + "\n")
+                    continue
                 
                 try:
                     # Discord rate limits deletes too, so we sleep briefly
                     time.sleep(0.5)
                     requests.delete(f"{webhook_url}/messages/{msg_id}", timeout=10)
                 except Exception as e:
-                    pass
+                    # Keep line if delete fails so we can try again later
+                    kept_lines.append(line + "\n")
                     
-            # Clear the file after deleting
+            # Clear the file after deleting and rewrite kept lines
             with open(msg_ids_file, "w") as f:
-                f.write("")
+                f.writelines(kept_lines)
                 
             logger.info("  ✨ Discord channels cleaned.")
         except Exception as e:
@@ -314,6 +327,6 @@ def dispatch_trend_alert(result: TrendResult):
     """Helper function to dispatch an alert using the global dispatcher."""
     DISPATCHER.dispatch(result)
 
-def dispatch_text_message(text: str):
+def dispatch_text_message(text: str, timeframe: str = None):
     """Helper function to dispatch a plain text message using the global dispatcher."""
-    DISPATCHER.dispatch_message(text)
+    DISPATCHER.dispatch_message(text, timeframe)
