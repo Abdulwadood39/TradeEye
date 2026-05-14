@@ -354,7 +354,7 @@ def signal_pivot_channel(df: pd.DataFrame) -> SignalResult:
 # VETO GATES
 # ─────────────────────────────────────────────────────────────────────────────
 
-def veto_r2_linearity(df: pd.DataFrame, min_r2: float = 0.65) -> SignalResult:
+def veto_r2_linearity(df: pd.DataFrame, min_r2: float = 0.75) -> SignalResult:
     close = df["close"].values
     x = np.arange(len(close), dtype=np.float64)
     slope, intercept = np.polyfit(x, close, 1)

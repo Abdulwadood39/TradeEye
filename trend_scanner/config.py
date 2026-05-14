@@ -15,6 +15,28 @@ load_dotenv()
 # DEFAULT TICKER LISTS — override at runtime via CLI --tickers
 # ─────────────────────────────────────────────────────────────────────────────
 
+STOCKS_INDEX = [
+    'AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA', 'AMD', 'AVGO', 'NFLX',
+    'INTC', 'QCOM', 'CSCO', 'ORCL', 'ADBE', 'CRM', 'MU', 'AMAT', 'LRCX', 'KLAC',
+
+    'SMCI', 'ARM', 'ASML', 'TSM', 'SOXX', 'SMH', 'NXPI', 'MRVL', 'ADI', 'MCHP',
+
+    'JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'SCHW', 'AXP', 'BLK', 'USB',
+
+    'WMT', 'COST', 'HD', 'LOW', 'TGT', 'MCD', 'SBUX', 'NKE', 'CMG', 'TJX',
+
+    'GOOG', 'UBER', 'ABNB', 'SPOT', 'PYPL', 'SHOP', 'SQ', 'PLTR', 'SNOW', 'NET',
+
+    'LLY', 'JNJ', 'UNH', 'ABBV', 'MRK', 'PFE', 'TMO', 'DHR', 'ISRG', 'VRTX',
+
+    'XOM', 'CVX', 'COP', 'SLB', 'EOG', 'MPC', 'PSX', 'VLO', 'OXY', 'HAL',
+
+    'CAT', 'DE', 'GE', 'RTX', 'HON', 'UPS', 'FDX', 'UNP', 'ETN', 'PH',
+
+    'SPY', 'QQQ', 'DIA', 'IWM', 'VTI', 'XLF', 'XLK', 'XLE', 'XLV', 'XLI',
+    'XLY', 'XLP', 'XLU', 'ARKK', 'SOXL', 'TQQQ', 'SQQQ', 'UVXY', 'VXX', 'TLT'
+]
+
 FOREX_TICKERS: List[str] = [
     'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'USDCHF=X', 'AUDUSD=X', 'NZDUSD=X', 'USDCAD=X',
     'AUDPLN=X', 'HKDJPY=X', 'CADPLN=X', 'ZARJPY=X', 'EURYJPY=X', 'GBPDKK=X', 'AUDNOK=X', 
@@ -51,8 +73,6 @@ FOREX_TICKERS: List[str] = [
 ]
 
 DEFAULT_TICKERS: List[str] = [
-    # Stocks
-    "AAPL", "NVDA", "TSLA", "MSFT",
     # Crypto (yfinance format — auto-routed to CCXT Binance if CCXT source)
     "BTC-USD", "ETH-USD", "SOL-USD",
     # Commodities
@@ -64,7 +84,7 @@ DEFAULT_TICKERS: List[str] = [
     "LE=F",   # Live Cattle
     "KC=F",   # Coffee
     "CC=F",   # Cocoa
-] + FOREX_TICKERS
+] + FOREX_TICKERS + STOCKS_INDEX
 
 # Map yfinance-style crypto tickers → CCXT symbol (BTC-USD → BTC/USDT)
 YFINANCE_TO_CCXT: Dict[str, str] = {
@@ -147,7 +167,7 @@ class TrendConfig:
     # Candle window to run signals over (use last N candles of fetched data)
     analysis_window_1h: int = 2500    # 21 trading days
     analysis_window_1m: int = 2500    # ~3.5 intraday hours
-    analysis_window: int = 2500      # Fallback
+    analysis_window: int = 3000      # Fallback
 
 
 # ─────────────────────────────────────────────────────────────────────────────
