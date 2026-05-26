@@ -1,11 +1,14 @@
 """
-signals.py — Five independent trend-detection signals.
+signals.py — Five independent trend-detection signals + veto gates.
 
 Each signal function returns a SignalResult with:
   passed    : bool
   direction : 'up' | 'down' | 'none'
   score     : float (confidence within the signal, 0.0–1.0)
   detail    : dict with raw values for charting / logging
+
+All thresholds default to CFG.trend.* / CFG.vetoes.* so they are fully
+controlled from scanner.toml (or a profile override) without touching code.
 """
 from __future__ import annotations
 
@@ -162,6 +165,7 @@ def signal_adx(df: pd.DataFrame) -> SignalResult:
     """
     ADX measures trend strength (direction-neutral).
     +DI > -DI → uptrend; -DI > +DI → downtrend.
+    Optional: require ADX to be rising (CFG.trend.adx_require_rising).
     """
     period = CFG.trend.adx_period
     threshold = CFG.trend.adx_threshold
@@ -182,17 +186,24 @@ def signal_adx(df: pd.DataFrame) -> SignalResult:
             dmp_col  = [c for c in adx_df.columns if "DMP" in c or "+DI" in c][0]
             dmn_col  = [c for c in adx_df.columns if "DMN" in c or "-DI" in c][0]
 
-        adx_val = float(adx_df[adx_col].iloc[-1])
+        adx_series = adx_df[adx_col].dropna()
+        adx_val = float(adx_series.iloc[-1])
         dmp_val = float(adx_df[dmp_col].iloc[-1])
         dmn_val = float(adx_df[dmn_col].iloc[-1])
+
+        # ADX rising check (last 5 bars)
+        adx_rising = True
+        if CFG.trend.adx_require_rising and len(adx_series) >= 5:
+            adx_rising = float(adx_series.iloc[-1]) > float(adx_series.iloc[-5])
 
     except Exception:
         # Manual ADX calculation fallback
         adx_val, dmp_val, dmn_val = _manual_adx(
             df["high"].values, df["low"].values, df["close"].values, period
         )
+        adx_rising = True  # Can't compute rising from manual fallback
 
-    passed = adx_val >= threshold and not (np.isnan(adx_val))
+    passed = adx_val >= threshold and not (np.isnan(adx_val)) and adx_rising
     direction = "none"
     if passed:
         if dmp_val > dmn_val:
@@ -202,16 +213,19 @@ def signal_adx(df: pd.DataFrame) -> SignalResult:
 
     score = min(adx_val / 50.0, 1.0)  # ADX 50 = max score
 
+    detail = {
+        "adx":     round(adx_val, 2),
+        "+di":     round(dmp_val, 2),
+        "-di":     round(dmn_val, 2),
+        "rising":  adx_rising,
+    }
+
     return SignalResult(
         name="ADX",
         passed=passed,
         direction=direction,
         score=score,
-        detail={
-            "adx":  round(adx_val, 2),
-            "+di":  round(dmp_val, 2),
-            "-di":  round(dmn_val, 2),
-        },
+        detail=detail,
     )
 
 
@@ -352,9 +366,16 @@ def signal_pivot_channel(df: pd.DataFrame) -> SignalResult:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # VETO GATES
+# All thresholds read from CFG.vetoes.* — configured via scanner.toml / profiles
 # ─────────────────────────────────────────────────────────────────────────────
 
-def veto_r2_linearity(df: pd.DataFrame, min_r2: float = 0.75) -> SignalResult:
+def veto_r2_linearity(df: pd.DataFrame) -> SignalResult:
+    """
+    Full-window R² linearity check.
+    Ensures close prices follow a straight line across the entire analysis window.
+    Threshold: CFG.vetoes.min_r2
+    """
+    min_r2 = CFG.vetoes.min_r2
     close = df["close"].values
     x = np.arange(len(close), dtype=np.float64)
     slope, intercept = np.polyfit(x, close, 1)
@@ -363,8 +384,49 @@ def veto_r2_linearity(df: pd.DataFrame, min_r2: float = 0.75) -> SignalResult:
     ss_tot = np.sum((close - np.mean(close)) ** 2)
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
     passed = r2 >= min_r2
-    return SignalResult(name="R² Linearity", passed=passed, direction="none",
-                        score=r2, detail={"r2": round(r2, 4)}, is_veto=True)
+    return SignalResult(
+        name="R² Linearity",
+        passed=passed,
+        direction="none",
+        score=r2,
+        detail={"r2": round(r2, 4), "threshold": min_r2},
+        is_veto=True,
+    )
+
+
+def veto_rolling_r2(df: pd.DataFrame) -> SignalResult:
+    """
+    Rolling R² veto — checks linearity on recent candles only.
+
+    A full-window R² can be deceiving when an asset was trending earlier
+    but has since started consolidating. This veto catches those breakdowns
+    by computing R² on only the last `rolling_r2_window` candles.
+
+    Threshold: CFG.vetoes.rolling_r2_min (slightly relaxed vs min_r2)
+    """
+    window = CFG.vetoes.rolling_r2_window
+    min_r2 = CFG.vetoes.rolling_r2_min
+
+    recent = df.iloc[-window:] if len(df) > window else df
+    close = recent["close"].values.astype(np.float64)
+    x = np.arange(len(close), dtype=np.float64)
+
+    slope, intercept = np.polyfit(x, close, 1)
+    predicted = slope * x + intercept
+    ss_res = np.sum((close - predicted) ** 2)
+    ss_tot = np.sum((close - np.mean(close)) ** 2)
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    passed = r2 >= min_r2
+
+    return SignalResult(
+        name="Rolling R²",
+        passed=passed,
+        direction="none",
+        score=r2,
+        detail={"rolling_r2": round(r2, 4), "window": len(close), "threshold": min_r2},
+        is_veto=True,
+    )
+
 
 def _compute_atr(df: pd.DataFrame, period: int = 14) -> float:
     high = df["high"].values
@@ -381,20 +443,63 @@ def _compute_atr(df: pd.DataFrame, period: int = 14) -> float:
         tr[i] = max(hl, hpc, lpc)
     return float(np.mean(tr[-period:]))
 
+
 def veto_atr_consolidation(df: pd.DataFrame, period: int = 14, window: int = 250) -> SignalResult:
+    """
+    ATR Efficiency veto — net_move / (ATR × n_candles).
+    Filters sideways consolidation where many candles cancel each other out.
+    Threshold: CFG.vetoes.atr_efficiency
+    """
+    threshold = CFG.vetoes.atr_efficiency
     recent_df = df.iloc[-window:] if len(df) > window else df
     atr = _compute_atr(recent_df, period)
     close = recent_df["close"].values
     net_move = abs(close[-1] - close[0])
     total_atr = atr * len(recent_df)
     efficiency_ratio = net_move / total_atr if total_atr > 0 else 0.0
-    # Raised from 0.02 → 0.035 to be more selective against sideways chop
-    passed = efficiency_ratio >= 0.035
-    return SignalResult(name="ATR Efficiency", passed=passed, direction="none",
-                        score=efficiency_ratio, detail={"efficiency_ratio": round(efficiency_ratio, 4)},
-                        is_veto=True)
+    passed = efficiency_ratio >= threshold
+    return SignalResult(
+        name="ATR Efficiency",
+        passed=passed,
+        direction="none",
+        score=efficiency_ratio,
+        detail={"efficiency_ratio": round(efficiency_ratio, 4), "threshold": threshold},
+        is_veto=True,
+    )
+
+
+def veto_kaufman_er(df: pd.DataFrame) -> SignalResult:
+    """
+    Kaufman Efficiency Ratio veto.
+
+    ER = |net_move| / Σ|individual bar moves|
+    ER ≈ 1.0 → perfectly straight-line trend (clean)
+    ER ≈ 0.0 → random walk / zigzag (noisy, veto it)
+
+    This is orthogonal to ATR Efficiency and catches "high ADX but choppy"
+    false positives that the ATR veto misses.
+    Threshold: CFG.vetoes.kaufman_er_min
+    """
+    threshold = CFG.vetoes.kaufman_er_min
+    close = df["close"].values.astype(np.float64)
+
+    net_move = abs(close[-1] - close[0])
+    bar_moves = np.sum(np.abs(np.diff(close)))
+    er = net_move / bar_moves if bar_moves > 0 else 0.0
+    passed = er >= threshold
+
+    return SignalResult(
+        name="Kaufman ER",
+        passed=passed,
+        direction="none",
+        score=er,
+        detail={"kaufman_er": round(er, 4), "threshold": threshold},
+        is_veto=True,
+    )
+
 
 def veto_trend_break(df: pd.DataFrame, direction: str, lookback: int = 50) -> SignalResult:
+    """Veto if the most recent swing pivot has already broken the trend."""
     recent = df.iloc[-lookback:]
     pivot_hi, pivot_lo = get_pivots(recent, order=3)
     passed = True
@@ -406,23 +511,37 @@ def veto_trend_break(df: pd.DataFrame, direction: str, lookback: int = 50) -> Si
         hi_prices = recent["high"].values[pivot_hi]
         if hi_prices[-1] > hi_prices[-2]:
             passed = False
-    return SignalResult(name="Trend Break", passed=passed, direction="none",
-                        score=1.0 if passed else 0.0, detail={}, is_veto=True)
+    return SignalResult(
+        name="Trend Break",
+        passed=passed,
+        direction="none",
+        score=1.0 if passed else 0.0,
+        detail={},
+        is_veto=True,
+    )
 
 
-def veto_ema_alignment(df: pd.DataFrame, direction: str,
-                       fast_period: int = 50, slow_period: int = 200) -> SignalResult:
+def veto_ema_alignment(df: pd.DataFrame, direction: str) -> SignalResult:
     """
-    Veto if price is not aligned with both EMA-50 and EMA-200.
+    Veto if price is not aligned with both EMA-fast and EMA-slow.
     For an uptrend: close must be above both EMAs.
     For a downtrend: close must be below both EMAs.
-    Requires at least slow_period candles to be meaningful.
+    Periods: CFG.vetoes.ema_fast / CFG.vetoes.ema_slow
     """
+    fast_period = CFG.vetoes.ema_fast
+    slow_period = CFG.vetoes.ema_slow
+
     close = df["close"].values.astype(np.float64)
     if len(close) < slow_period:
         # Not enough data — skip this veto (do not block)
-        return SignalResult(name="EMA Alignment", passed=True, direction="none",
-                            score=1.0, detail={"skipped": "not enough candles"}, is_veto=True)
+        return SignalResult(
+            name="EMA Alignment",
+            passed=True,
+            direction="none",
+            score=1.0,
+            detail={"skipped": "not enough candles"},
+            is_veto=True,
+        )
 
     def ema(series, period):
         s = pd.Series(series)
@@ -444,21 +563,25 @@ def veto_ema_alignment(df: pd.DataFrame, direction: str,
         passed=passed,
         direction="none",
         score=1.0 if passed else 0.0,
-        detail={"ema_fast": round(ema_fast, 4), "ema_slow": round(ema_slow, 4), "close": round(last_close, 4)},
+        detail={
+            f"ema_{fast_period}": round(ema_fast, 4),
+            f"ema_{slow_period}": round(ema_slow, 4),
+            "close": round(last_close, 4),
+        },
         is_veto=True,
     )
 
 
-def veto_sideways_body(df: pd.DataFrame, window: int = 100,
-                        min_body_ratio: float = 0.35) -> SignalResult:
+def veto_sideways_body(df: pd.DataFrame, window: int = 100) -> SignalResult:
     """
     Veto if the majority of recent candles are doji / spinning-tops (tiny body).
     This catches sideways congestion that passes other signals but looks like chop.
 
     Body ratio = abs(close - open) / (high - low).
     If the *median* body ratio across the last `window` candles is below
-    `min_body_ratio`, the market is mostly indecisive — reject it.
+    CFG.vetoes.body_ratio, the market is mostly indecisive — reject it.
     """
+    min_body_ratio = CFG.vetoes.body_ratio
     recent = df.iloc[-window:] if len(df) > window else df
 
     candle_range = (recent["high"] - recent["low"]).values
@@ -476,6 +599,6 @@ def veto_sideways_body(df: pd.DataFrame, window: int = 100,
         passed=passed,
         direction="none",
         score=median_ratio,
-        detail={"median_body_ratio": round(median_ratio, 4)},
+        detail={"median_body_ratio": round(median_ratio, 4), "threshold": min_body_ratio},
         is_veto=True,
     )

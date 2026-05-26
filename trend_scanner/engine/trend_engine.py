@@ -4,6 +4,9 @@ trend_engine.py — Aggregates all 5 signals into a final TrendResult.
 Usage:
     engine = TrendEngine()
     result = engine.analyze(df, ticker="AAPL", timeframe="1h")
+
+Veto gates are controlled by CFG.vetoes.enabled (scanner.toml [vetoes] enabled).
+Analysis window per timeframe is driven by CFG.trend.analysis_windows dict.
 """
 from __future__ import annotations
 
@@ -21,7 +24,9 @@ from trend_scanner.engine.signals import (
     signal_market_structure,
     signal_pivot_channel,
     veto_r2_linearity,
+    veto_rolling_r2,
     veto_atr_consolidation,
+    veto_kaufman_er,
     veto_trend_break,
     veto_ema_alignment,
     veto_sideways_body,
@@ -44,10 +49,11 @@ class TrendResult:
     candles_analyzed: int = 0
     vlm_verdict:      Optional[str] = None
     vlm_confidence:   Optional[float] = None
-    chart_1h_path:    Optional[str] = None
-    chart_1d_path:    Optional[str] = None
-    chart_1m_path:    Optional[str] = None
+    chart_path:       Optional[str] = None    # unified chart path (any timeframe)
+    chart_1h_path:    Optional[str] = None    # kept for backward compat
+    chart_1d_path:    Optional[str] = None    # kept for backward compat
     veto_killed:      bool = False
+    initial_direction: str = "none"           # direction before veto filtering
 
     @property
     def is_trending(self) -> bool:
@@ -74,16 +80,18 @@ class TrendResult:
             "ticker":           self.ticker,
             "timeframe":        self.timeframe,
             "direction":        self.direction,
+            "initial_direction": self.initial_direction,
             "score":            self.score,
             "confidence":       round(self.confidence, 3),
             "signals_passed":   ", ".join(self.signals_passed),
             "candles_analyzed": self.candles_analyzed,
+            "veto_killed":      self.veto_killed,
             "vlm_verdict":      self.vlm_verdict or "",
             "vlm_confidence":   self.vlm_confidence or "",
-            "chart_path":       self.chart_1h_path or self.chart_1d_path or "",
+            "chart_path":       self.chart_path or self.chart_1h_path or self.chart_1d_path or "",
             # Individual signal details
             **{
-                f"sig_{s.name.lower().replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '')}": (
+                f"sig_{s.name.lower().replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '').replace('²', '2')}": (
                     f"{'✓' if s.passed else '✗'} {s.direction} {s.score:.2f}"
                 )
                 for s in self.signals
@@ -109,7 +117,8 @@ class TrendEngine:
     """
     Runs all 5 signals and aggregates results into a TrendResult.
 
-    Only the last `analysis_window` candles are used (configurable).
+    Veto gates run only when CFG.vetoes.enabled is True.
+    Analysis window is resolved from CFG.trend.analysis_windows per timeframe.
     """
 
     def __init__(self, config=None):
@@ -122,13 +131,13 @@ class TrendEngine:
         timeframe: str,
     ) -> TrendResult:
         """
-        Run the full 5-signal trend analysis.
+        Run the full 5-signal trend analysis, then apply veto gates.
 
         Parameters
         ----------
         df        : Full OHLCV DataFrame (any length)
         ticker    : Ticker symbol
-        timeframe : Timeframe string
+        timeframe : Timeframe string (e.g. '1h', '5m', '30m')
 
         Returns
         -------
@@ -138,12 +147,11 @@ class TrendEngine:
             return TrendResult(
                 ticker=ticker, timeframe=timeframe, direction="none",
                 score=0, confidence=0.0, candles_analyzed=0,
+                initial_direction="none",
             )
 
-        # Slice to analysis window
-        window_map = {"1m": self.cfg.analysis_window_1m, "1h": self.cfg.analysis_window_1h}
-        window = window_map.get(timeframe, self.cfg.analysis_window)
-        window = min(window, len(df))
+        # Slice to analysis window — driven by CFG for any timeframe
+        window = min(self.cfg.window_for(timeframe), len(df))
         analysis_df = df.iloc[-window:].reset_index(drop=True)
 
         # Run all 5 signals
@@ -169,21 +177,37 @@ class TrendEngine:
         direction = initial_direction
         veto_killed = False
 
-        if direction != "none":
-            # Run Veto Gates (order matters: cheapest first)
+        if direction != "none" and CFG.vetoes.enabled:
+            # Run Veto Gates (order: cheapest/fastest first)
             vetoes: List[SignalResult] = [
                 veto_r2_linearity(analysis_df),
+                veto_rolling_r2(analysis_df),
                 veto_atr_consolidation(analysis_df),
+                veto_kaufman_er(analysis_df),
                 veto_sideways_body(analysis_df),
                 veto_ema_alignment(analysis_df, direction),
                 veto_trend_break(analysis_df, direction),
             ]
             all_signals.extend(vetoes)
-            
+
             for veto in vetoes:
                 if not veto.passed:
                     direction = "none"
                     veto_killed = True
+                    break  # one failed veto is enough — stop early
+
+        elif direction != "none" and not CFG.vetoes.enabled:
+            # Vetoes disabled — still log them for visibility but don't apply
+            vetoes: List[SignalResult] = [
+                veto_r2_linearity(analysis_df),
+                veto_rolling_r2(analysis_df),
+                veto_atr_consolidation(analysis_df),
+                veto_kaufman_er(analysis_df),
+                veto_sideways_body(analysis_df),
+                veto_ema_alignment(analysis_df, direction),
+                veto_trend_break(analysis_df, direction),
+            ]
+            all_signals.extend(vetoes)
 
         # Score = number of signals that agree with initial direction (excluding vetoes)
         if initial_direction != "none":
@@ -195,7 +219,10 @@ class TrendEngine:
             score = sum(1 for s in all_signals if s.passed and not getattr(s, "is_veto", False))
 
         # Confidence = mean score of passing signals (excluding vetoes)
-        passing = [s for s in all_signals if s.passed and s.direction == initial_direction and not getattr(s, "is_veto", False)]
+        passing = [
+            s for s in all_signals
+            if s.passed and s.direction == initial_direction and not getattr(s, "is_veto", False)
+        ]
         confidence = float(sum(s.score for s in passing) / len(passing)) if passing else 0.0
 
         signals_passed = [s.name for s in passing]
@@ -204,6 +231,7 @@ class TrendEngine:
             ticker=ticker,
             timeframe=timeframe,
             direction=direction,
+            initial_direction=initial_direction,
             score=score,
             confidence=confidence,
             signals=all_signals,

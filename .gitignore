@@ -7,3 +7,4 @@ __pycache__
 trend_scanner/output/*
 .venv
 outputs_server
+clear_discord.py

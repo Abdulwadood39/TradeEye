@@ -123,8 +123,9 @@ def print_result(result: TrendResult, verbose: bool = None):
             (f"  conf={result.vlm_confidence:.0%}" if result.vlm_confidence else "")
         )
 
-    if result.chart_1h_path:
-        logger.info(_c(f"  📊 Chart: {result.chart_1h_path}", _CYAN))
+    chart = result.chart_path or result.chart_1h_path or result.chart_1d_path
+    if chart:
+        logger.info(_c(f"  📊 Chart: {chart}", _CYAN))
 
     logger.info(_c(border, border_color))
     logger.info("")
@@ -141,12 +142,7 @@ def print_scan_header(tickers: List[str], timeframes: List[str], n_candles: int)
     logger.info(_c(f"  Timeframes: {', '.join(timeframes)}", _BLUE))
     logger.info(_c(f"  Data Fetch: {n_candles} candles maximum per timeframe", _BLUE))
 
-    cfg = CFG.trend
-    analysis_strs = []
-    if "1m" in timeframes: analysis_strs.append(f"1m={cfg.analysis_window_1m}")
-    if "1h" in timeframes: analysis_strs.append(f"1h={cfg.analysis_window_1h}")
-    other_tfs = [t for t in timeframes if t not in ("1m", "1h")]
-    if other_tfs: analysis_strs.append(f"others={cfg.analysis_window}")
+    analysis_strs = [f"{tf}={CFG.trend.window_for(tf)}" for tf in timeframes]
 
     logger.info(_c(f"  Analysis:   {', '.join(analysis_strs)} candles per scan", _YELLOW))
     logger.info(_c("═" * 60, _CYAN))

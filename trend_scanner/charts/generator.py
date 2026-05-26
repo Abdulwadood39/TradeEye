@@ -90,7 +90,7 @@ def _draw_trend_chart(
 
     fig, (ax_main, ax_vol) = plt.subplots(
         2, 1,
-        figsize=cfg.figsize_1h,
+        figsize=cfg.figsize_per_tf[timeframe] or cfg.figsize_default,
         facecolor=cfg.bg,
         gridspec_kw={"height_ratios": [4, 1], "hspace": 0.04},
     )
@@ -165,10 +165,10 @@ def _draw_trend_chart(
     ax_main.set_xticklabels([])
 
     # ── Save ─────────────────────────────────────────────────────────────────
-    os.makedirs(cfg.output_dir, exist_ok=True)
     direction_tag = result.direction.upper()
-    fname = f"{result.ticker.replace('/', '_')}_{timeframe}_{direction_tag}.png"
-    save_path = os.path.join(cfg.output_dir, fname)
+    os.makedirs(os.path.join(cfg.output_dir, timeframe, direction_tag), exist_ok=True)
+    fname = f"{result.ticker.replace('/', '_')}.png"
+    save_path = os.path.join(cfg.output_dir, timeframe, direction_tag, fname)
 
     plt.tight_layout(rect=[0, 0, 1, 0.94])
     fig.savefig(save_path, dpi=cfg.dpi, bbox_inches="tight", facecolor=cfg.bg)
