@@ -1,0 +1,145 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.app.admin.auth import is_admin_authenticated, require_admin, verify_admin_credentials
+from backend.app.core.config import get_settings
+from backend.app.db.models.billing import Plan
+from backend.app.db.models.catalog import IndicatorType, Ticker, Timeframe, TimeframeScanSchedule
+from backend.app.db.models.scan import ScanRun
+from backend.app.db.models.user import User, UserSubscription
+from backend.app.db.session import get_db
+from backend.app.services.scan_scheduler import reload_schedule
+
+templates = Jinja2Templates(directory="backend/app/admin/templates")
+router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+@router.get("/login", response_class=HTMLResponse)
+async def admin_login_page(request: Request) -> HTMLResponse:
+    if is_admin_authenticated(request):
+        return RedirectResponse("/admin/", status_code=303)
+    return templates.TemplateResponse(request, "login.html", {"error": None})
+
+
+@router.post("/login")
+async def admin_login(request: Request, username: str = Form(...), password: str = Form(...)):
+    if verify_admin_credentials(username, password):
+        request.session["admin_authenticated"] = True
+        return RedirectResponse("/admin/", status_code=303)
+    return templates.TemplateResponse(request, "login.html", {"error": "Invalid credentials"}, status_code=401)
+
+
+@router.get("/logout")
+async def admin_logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/admin/login", status_code=303)
+
+
+@router.get("/", response_class=HTMLResponse)
+async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)) -> HTMLResponse:
+    require_admin(request)
+    users = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
+    subs = (await db.execute(select(func.count()).select_from(UserSubscription))).scalar() or 0
+    runs = (
+        await db.execute(select(ScanRun).order_by(ScanRun.started_at.desc()).limit(10))
+    ).scalars().all()
+    return templates.TemplateResponse(
+        request,
+        "dashboard.html",
+        {"users": users, "subs": subs, "runs": runs},
+    )
+
+
+@router.get("/tickers", response_class=HTMLResponse)
+async def admin_tickers(request: Request, db: AsyncSession = Depends(get_db)) -> HTMLResponse:
+    require_admin(request)
+    tickers = (await db.execute(select(Ticker).order_by(Ticker.display_name))).scalars().all()
+    return templates.TemplateResponse(request, "tickers.html", {"tickers": tickers})
+
+
+@router.post("/tickers")
+async def admin_create_ticker(
+    request: Request,
+    yfinance_symbol: str = Form(...),
+    display_name: str = Form(...),
+    category: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    require_admin(request)
+    db.add(Ticker(yfinance_symbol=yfinance_symbol, display_name=display_name, category=category))
+    await db.commit()
+    return RedirectResponse("/admin/tickers", status_code=303)
+
+
+@router.post("/tickers/{ticker_id}/toggle")
+async def admin_toggle_ticker(ticker_id: UUID, request: Request, db: AsyncSession = Depends(get_db)):
+    require_admin(request)
+    ticker = (await db.execute(select(Ticker).where(Ticker.id == ticker_id))).scalar_one()
+    ticker.is_active = not ticker.is_active
+    await db.commit()
+    return RedirectResponse("/admin/tickers", status_code=303)
+
+
+@router.get("/timeframes", response_class=HTMLResponse)
+async def admin_timeframes(request: Request, db: AsyncSession = Depends(get_db)) -> HTMLResponse:
+    require_admin(request)
+    timeframes = (await db.execute(select(Timeframe).order_by(Timeframe.code))).scalars().all()
+    return templates.TemplateResponse(request, "timeframes.html", {"timeframes": timeframes})
+
+
+@router.get("/schedules", response_class=HTMLResponse)
+async def admin_schedules(request: Request, db: AsyncSession = Depends(get_db)) -> HTMLResponse:
+    require_admin(request)
+    rows = (
+        await db.execute(
+            select(TimeframeScanSchedule, Timeframe)
+            .join(Timeframe, TimeframeScanSchedule.timeframe_id == Timeframe.id)
+            .order_by(Timeframe.code)
+        )
+    ).all()
+    return templates.TemplateResponse(request, "schedules.html", {"rows": rows})
+
+
+@router.post("/schedules/{schedule_id}")
+async def admin_update_schedule(
+    schedule_id: UUID,
+    request: Request,
+    interval_minutes: int = Form(...),
+    is_enabled: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+):
+    require_admin(request)
+    schedule = (
+        await db.execute(select(TimeframeScanSchedule).where(TimeframeScanSchedule.id == schedule_id))
+    ).scalar_one()
+    schedule.interval_minutes = interval_minutes
+    schedule.is_enabled = is_enabled == "on"
+    await db.commit()
+    await reload_schedule(schedule.timeframe_id)
+    return RedirectResponse("/admin/schedules", status_code=303)
+
+
+@router.get("/plans", response_class=HTMLResponse)
+async def admin_plans(request: Request, db: AsyncSession = Depends(get_db)) -> HTMLResponse:
+    require_admin(request)
+    plans = (await db.execute(select(Plan).order_by(Plan.name))).scalars().all()
+    return templates.TemplateResponse(request, "plans.html", {"plans": plans})
+
+
+@router.get("/settings", response_class=HTMLResponse)
+async def admin_settings(request: Request) -> HTMLResponse:
+    require_admin(request)
+    settings = get_settings()
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {"default_bars": settings.default_subscription_bars},
+    )

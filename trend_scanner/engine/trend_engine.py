@@ -121,8 +121,9 @@ class TrendEngine:
     Analysis window is resolved from CFG.trend.analysis_windows per timeframe.
     """
 
-    def __init__(self, config=None):
+    def __init__(self, config=None, vetoes_config=None):
         self.cfg = config or CFG.trend
+        self.vetoes_cfg = vetoes_config if vetoes_config is not None else CFG.vetoes
 
     def analyze(
         self,
@@ -177,7 +178,7 @@ class TrendEngine:
         direction = initial_direction
         veto_killed = False
 
-        if direction != "none" and CFG.vetoes.enabled:
+        if direction != "none" and self.vetoes_cfg.enabled:
             # Run Veto Gates (order: cheapest/fastest first)
             vetoes: List[SignalResult] = [
                 veto_r2_linearity(analysis_df),
@@ -196,7 +197,7 @@ class TrendEngine:
                     veto_killed = True
                     break  # one failed veto is enough — stop early
 
-        elif direction != "none" and not CFG.vetoes.enabled:
+        elif direction != "none" and not self.vetoes_cfg.enabled:
             # Vetoes disabled — still log them for visibility but don't apply
             vetoes: List[SignalResult] = [
                 veto_r2_linearity(analysis_df),

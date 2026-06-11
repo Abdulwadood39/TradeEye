@@ -48,9 +48,13 @@ class TelegramPlatform(BasePlatform):
         self.chat_ids = [cid.strip() for cid in chat_id.split(',')] if chat_id else []
 
     def send_alert(self, result: TrendResult) -> bool:
+        success, _ = self.send_alert_with_id(result)
+        return success
+
+    def send_alert_with_id(self, result: TrendResult) -> tuple[bool, str | None]:
         if not self.token or not self.chat_ids:
             logger.warning("  ⚠️  Telegram token or chat_id(s) missing. Cannot send alert.")
-            return False
+            return False, None
 
         message = (
             f"*{result.emoji} {result.direction_label} Alert: {result.ticker}*\n"
@@ -64,6 +68,7 @@ class TelegramPlatform(BasePlatform):
         url = f"https://api.telegram.org/bot{self.token}/"
         chart_path = result.chart_path or result.chart_1h_path or result.chart_1d_path
         success = True
+        last_msg_id: str | None = None
 
         for cid in self.chat_ids:
             try:
@@ -82,11 +87,28 @@ class TelegramPlatform(BasePlatform):
                         timeout=30,
                     )
                 resp.raise_for_status()
+                data = resp.json()
+                if data.get("ok") and data.get("result"):
+                    last_msg_id = str(data["result"].get("message_id"))
                 logger.info(f"  📩 Telegram alert sent for {result.ticker} [{result.timeframe}] to {cid}")
             except Exception as e:
                 logger.error(f"  ❌ Failed to send Telegram alert to {cid}: {e}")
                 success = False
-        return success
+        return success, last_msg_id
+
+    def delete_message(self, chat_id: str, message_id: str) -> bool:
+        if not self.token:
+            return False
+        try:
+            resp = requests.post(
+                f"https://api.telegram.org/bot{self.token}/deleteMessage",
+                data={"chat_id": chat_id, "message_id": message_id},
+                timeout=10,
+            )
+            return resp.status_code == 200 and resp.json().get("ok", False)
+        except Exception as e:
+            logger.error(f"  Failed to delete Telegram message {message_id}: {e}")
+            return False
 
     def send_message(self, text: str, timeframe: str = None) -> bool:
         if not self.token or not self.chat_ids:
@@ -132,10 +154,10 @@ class DiscordPlatform(BasePlatform):
             message += f"• VLM: {result.vlm_verdict}\n"
         return message
 
-    def _post(self, message: str, chart_path: str | None, timeframe: str | None, label: str) -> bool:
+    def _post(self, message: str, chart_path: str | None, timeframe: str | None, label: str) -> tuple[bool, str | None]:
         if not self.webhook_url:
             logger.warning(f"  \u26a0\ufe0f  Discord webhook_url missing for {label}.")
-            return False
+            return False, None
         url = self.webhook_url + "?wait=true"
         for attempt in range(4):   # up to 4 attempts with retry-after back-off
             try:
@@ -152,15 +174,32 @@ class DiscordPlatform(BasePlatform):
                     continue
 
                 resp.raise_for_status()
+                msg_id = self._extract_msg_id(resp)
                 self._save_msg_id(resp, timeframe)
                 logger.info(f"  \U0001f4e9 Discord [{label}] sent")
-                return True
+                return True, msg_id
 
             except Exception as e:
                 logger.error(f"  \u274c Failed to send Discord [{label}] (attempt {attempt + 1}): {e}")
                 if attempt < 3:
                     time.sleep(1.5)
-        return False
+        return False, None
+
+    def _extract_msg_id(self, resp: requests.Response) -> str | None:
+        try:
+            return str(resp.json().get("id")) if resp.content else None
+        except Exception:
+            return None
+
+    def delete_message(self, message_id: str) -> bool:
+        if not self.webhook_url or not message_id:
+            return False
+        try:
+            resp = requests.delete(f"{self.webhook_url}/messages/{message_id}", timeout=10)
+            return resp.status_code in (200, 204)
+        except Exception as e:
+            logger.error(f"  Failed to delete Discord message {message_id}: {e}")
+            return False
 
 
     def _save_msg_id(self, resp: requests.Response, timeframe: str | None):
@@ -177,6 +216,16 @@ class DiscordPlatform(BasePlatform):
 
     def send_alert(self, result: TrendResult) -> bool:
         chart_path = result.chart_path or result.chart_1h_path or result.chart_1d_path
+        success, _ = self._post(
+            message=self._build_message(result),
+            chart_path=chart_path,
+            timeframe=result.timeframe,
+            label="TREND",
+        )
+        return success
+
+    def send_alert_with_id(self, result: TrendResult) -> tuple[bool, str | None]:
+        chart_path = result.chart_path or result.chart_1h_path or result.chart_1d_path
         return self._post(
             message=self._build_message(result),
             chart_path=chart_path,
@@ -185,7 +234,8 @@ class DiscordPlatform(BasePlatform):
         )
 
     def send_message(self, text: str, timeframe: str = None) -> bool:
-        return self._post(message=text, chart_path=None, timeframe=timeframe, label="MSG")
+        success, _ = self._post(message=text, chart_path=None, timeframe=timeframe, label="MSG")
+        return success
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -221,15 +271,17 @@ class DiscordVetosPlatform(DiscordPlatform):
                 message += f"  {icon} {s.name}: {s.score:.3f}\n"
 
         chart_path = result.chart_path or result.chart_1h_path or result.chart_1d_path
-        return self._post(
+        success, _ = self._post(
             message=message,
             chart_path=chart_path,
             timeframe=result.timeframe,
             label="VETO",
         )
+        return success
 
     def send_message(self, text: str, timeframe: str = None) -> bool:
-        return self._post(message=text, chart_path=None, timeframe=timeframe, label="VETO-MSG")
+        success, _ = self._post(message=text, chart_path=None, timeframe=timeframe, label="VETO-MSG")
+        return success
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -311,15 +363,17 @@ class DiscordNoTrendPlatform(DiscordPlatform):
                 break
 
         logger.info(f"  📤 Flushing no-trend batch [{timeframe}]: {len(results)} tickers")
-        return self._post(
+        success, _ = self._post(
             message=message,
             chart_path=chart_path,
             timeframe=timeframe,
             label="NO-TREND",
         )
+        return success
 
     def send_message(self, text: str, timeframe: str = None) -> bool:
-        return self._post(message=text, chart_path=None, timeframe=timeframe, label="NO-TREND-MSG")
+        success, _ = self._post(message=text, chart_path=None, timeframe=timeframe, label="NO-TREND-MSG")
+        return success
 
 
 

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Scan Schedules — TradeEye Admin{% endblock %}
+{% block content %}
+<h1>Scan Schedules</h1>
+<p>Interval is in minutes. Next run is scheduled from scan <strong>start</strong> time.</p>
+<table>
+  <thead><tr><th>Timeframe</th><th>Interval (min)</th><th>Enabled</th><th>Last Started</th><th>Next Run</th><th></th></tr></thead>
+  <tbody>
+    {% for schedule, tf in rows %}
+    <tr>
+      <td>{{ tf.code }}</td>
+      <td colspan="4">
+        <form method="post" action="/admin/schedules/{{ schedule.id }}" class="grid">
+          <input type="number" name="interval_minutes" value="{{ schedule.interval_minutes }}" min="1" required>
+          <label><input type="checkbox" name="is_enabled" {% if schedule.is_enabled %}checked{% endif %}> Enabled</label>
+          <span>{{ schedule.last_started_at or "—" }}</span>
+          <span>{{ schedule.next_run_at or "—" }}</span>
+          <button type="submit">Save</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

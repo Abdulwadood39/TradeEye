@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — TradeEye Admin{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<div class="grid">
+  <article><header>Users</header><h2>{{ users }}</h2></article>
+  <article><header>Subscriptions</header><h2>{{ subs }}</h2></article>
+</div>
+<h3>Recent Scan Runs</h3>
+<table>
+  <thead><tr><th>Started</th><th>Status</th><th>Tickers</th><th>Trends</th></tr></thead>
+  <tbody>
+    {% for run in runs %}
+    <tr>
+      <td>{{ run.started_at }}</td>
+      <td>{{ run.status }}</td>
+      <td>{{ run.tickers_scanned }}</td>
+      <td>{{ run.trends_found }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4">No scans yet</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

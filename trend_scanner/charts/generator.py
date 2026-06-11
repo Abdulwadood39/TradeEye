@@ -44,6 +44,7 @@ def generate_chart(
     result: TrendResult,
     timeframe: str = "1h",
     chart_cfg: ChartConfig = None,
+    output_path: Optional[str] = None,
 ) -> Optional[str]:
     """
     Generate and save an annotated candlestick chart for a TrendResult.
@@ -69,7 +70,7 @@ def generate_chart(
     plot_df = df.iloc[-window:].reset_index(drop=True)
 
     try:
-        path = _draw_trend_chart(plot_df, result, timeframe, cfg)
+        path = _draw_trend_chart(plot_df, result, timeframe, cfg, output_path=output_path)
         return path
     except Exception as e:
         logger.warning(f"  [WARN] Chart generation failed for {result.ticker}: {e}")
@@ -85,6 +86,7 @@ def _draw_trend_chart(
     result: TrendResult,
     timeframe: str,
     cfg: ChartConfig,
+    output_path: Optional[str] = None,
 ) -> str:
     """Draw the full annotated chart and return save path."""
 
@@ -165,10 +167,14 @@ def _draw_trend_chart(
     ax_main.set_xticklabels([])
 
     # ── Save ─────────────────────────────────────────────────────────────────
-    direction_tag = result.direction.upper()
-    os.makedirs(os.path.join(cfg.output_dir, timeframe, direction_tag), exist_ok=True)
-    fname = f"{result.ticker.replace('/', '_')}.png"
-    save_path = os.path.join(cfg.output_dir, timeframe, direction_tag, fname)
+    if output_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        save_path = output_path
+    else:
+        direction_tag = result.direction.upper()
+        os.makedirs(os.path.join(cfg.output_dir, timeframe, direction_tag), exist_ok=True)
+        fname = f"{result.ticker.replace('/', '_')}.png"
+        save_path = os.path.join(cfg.output_dir, timeframe, direction_tag, fname)
 
     plt.tight_layout(rect=[0, 0, 1, 0.94])
     fig.savefig(save_path, dpi=cfg.dpi, bbox_inches="tight", facecolor=cfg.bg)

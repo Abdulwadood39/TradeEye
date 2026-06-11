@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tradeeye
+      POSTGRES_PASSWORD: tradeeye
+      POSTGRES_DB: tradeeye
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradeeye"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://tradeeye:tradeeye@db:5432/tradeeye
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./trend_scanner:/app/trend_scanner
+      - ./backend:/app/backend
+      - chart_tmp:/tmp/tradeeye/charts
+
+volumes:
+  pgdata:
+  chart_tmp:

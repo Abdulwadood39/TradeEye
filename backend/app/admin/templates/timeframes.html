@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Timeframes — TradeEye Admin{% endblock %}
+{% block content %}
+<h1>Timeframes</h1>
+<table>
+  <thead><tr><th>Code</th><th>Label</th><th>Active</th></tr></thead>
+  <tbody>
+    {% for tf in timeframes %}
+    <tr>
+      <td>{{ tf.code }}</td>
+      <td>{{ tf.label }}</td>
+      <td>{{ "Yes" if tf.is_active else "No" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

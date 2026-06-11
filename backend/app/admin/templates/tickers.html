@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Tickers — TradeEye Admin{% endblock %}
+{% block content %}
+<h1>Tickers</h1>
+<form method="post" action="/admin/tickers">
+  <div class="grid">
+    <input type="text" name="yfinance_symbol" placeholder="GC=F" required>
+    <input type="text" name="display_name" placeholder="Gold" required>
+    <select name="category" required>
+      <option value="forex">forex</option>
+      <option value="commodity">commodity</option>
+      <option value="crypto">crypto</option>
+      <option value="stock">stock</option>
+    </select>
+    <button type="submit">Add Ticker</button>
+  </div>
+</form>
+<table>
+  <thead><tr><th>Symbol</th><th>Display Name</th><th>Category</th><th>Active</th><th></th></tr></thead>
+  <tbody>
+    {% for t in tickers %}
+    <tr>
+      <td>{{ t.yfinance_symbol }}</td>
+      <td>{{ t.display_name }}</td>
+      <td>{{ t.category }}</td>
+      <td>{{ "Yes" if t.is_active else "No" }}</td>
+      <td>
+        <form method="post" action="/admin/tickers/{{ t.id }}/toggle" style="display:inline">
+          <button type="submit" class="outline">Toggle</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

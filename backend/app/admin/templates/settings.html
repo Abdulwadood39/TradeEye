@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Settings — TradeEye Admin{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<article>
+  <header>Default subscription bars</header>
+  <p>{{ default_bars }} (configured via DEFAULT_SUBSCRIPTION_BARS env var)</p>
+</article>
+{% endblock %}
