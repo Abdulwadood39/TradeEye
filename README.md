@@ -363,6 +363,27 @@ Tests cover password hashing, coordinator bars-matching logic, scheduler job reg
 
 ---
 
+## Production deployment (Ubuntu)
+
+CI/CD and server configs live in [`deploy/`](deploy/README.md):
+
+- **GitHub Actions** — `.github/workflows/ci-cd.yml` (test on PR, deploy on push to `main`/`saas`)
+- **systemd** — `deploy/systemd/tradeeye-api.service`
+- **nginx** — `deploy/nginx/tradeeye.conf`
+- **Scripts** — `deploy/scripts/bootstrap-server.sh` (first-time setup), `deploy/scripts/deploy.sh` (pull + migrate + restart)
+
+Quick start on a VPS:
+
+```bash
+git clone <repo> /opt/tradeeye && cd /opt/tradeeye
+sudo bash deploy/scripts/bootstrap-server.sh
+# edit /opt/tradeeye/.env, run migrations, start tradeeye-api
+```
+
+See [deploy/README.md](deploy/README.md) for GitHub secrets, TLS, and troubleshooting.
+
+---
+
 ## License
 
 Private / personal project — add your license here if open-sourcing.

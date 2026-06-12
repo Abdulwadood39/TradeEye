@@ -1,15 +1,26 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import List
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# backend/app/core/config.py → project root is three levels up
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_ENV_FILE = _PROJECT_ROOT / ".env"
+
+
+def _resolved_env_file() -> str | None:
+    if _ENV_FILE.is_file():
+        return str(_ENV_FILE)
+    return None
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_resolved_env_file(),
         env_file_encoding="utf-8",
         extra="ignore",
     )
