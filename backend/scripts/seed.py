@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-import re
+import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from sqlalchemy import select
 
-from backend.app.db.models.billing import Plan
+from backend.app.core.config import get_settings
+from backend.app.core.security import hash_password
+from backend.app.db.models.billing import Plan, Subscription
 from backend.app.db.models.catalog import IndicatorType, Ticker, Timeframe, TimeframeScanSchedule
+from backend.app.db.models.user import User
 from backend.app.db.session import async_session_factory, engine
 from backend.app.db.base import Base
 from trend_scanner.config.tickers import (
@@ -68,6 +72,48 @@ TIMEFRAMES = [
     ("1d", "1 Day", 1440),
     ("1w", "1 Week", 10080),
 ]
+
+DEV_USER_EMAIL = "admin@tradepulse.com"
+DEV_USER_PASSWORD = "admin123"
+
+
+def _should_seed_dev_user() -> bool:
+    settings = get_settings()
+    env = os.getenv("SEED_DEV_USER")
+    if env is not None:
+        return env.lower() in ("1", "true", "yes")
+    return settings.seed_dev_user or settings.debug
+
+
+async def _seed_dev_user(db) -> None:
+    existing = (
+        await db.execute(select(User).where(User.email == DEV_USER_EMAIL))
+    ).scalar_one_or_none()
+
+    if existing is None:
+        user = User(
+            email=DEV_USER_EMAIL,
+            password_hash=hash_password(DEV_USER_PASSWORD),
+            full_name="TradePulse Admin",
+            trading_style="swing_trader",
+            primary_market="forex",
+            email_verified_at=datetime.now(timezone.utc),
+        )
+        db.add(user)
+        await db.flush()
+        # print(f"  Created dev user: {DEV_USER_EMAIL} / {DEV_USER_PASSWORD}")
+    else:
+        user = existing
+        user.email_verified_at = user.email_verified_at or datetime.now(timezone.utc)
+        print(f"  Dev user already exists: {DEV_USER_EMAIL}")
+
+    plan = (await db.execute(select(Plan).where(Plan.slug == "free"))).scalar_one_or_none()
+    if plan:
+        billing_sub = (
+            await db.execute(select(Subscription).where(Subscription.user_id == user.id))
+        ).scalar_one_or_none()
+        if billing_sub is None:
+            db.add(Subscription(user_id=user.id, plan_id=plan.id, status="active"))
 
 
 async def seed() -> None:
@@ -132,6 +178,12 @@ async def seed() -> None:
             await upsert_ticker(symbol, _forex_alias(symbol), "forex")
         for symbol in STOCKS_INDEX:
             await upsert_ticker(symbol, _stock_alias(symbol), "stock")
+
+        if _should_seed_dev_user():
+            print("==> Seeding development user")
+            await _seed_dev_user(db)
+        else:
+            print("==> Skipping dev user (set SEED_DEV_USER=true or DEBUG=true to enable)")
 
         await db.commit()
         print("Seed completed successfully.")

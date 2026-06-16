@@ -16,7 +16,7 @@ The repo has two main parts:
 ## Prerequisites
 
 - **Python 3.12+**
-- **PostgreSQL 16** (local install or Docker)
+- **MySQL 8** (local install or Docker)
 - **Git**
 
 Optional:
@@ -108,35 +108,41 @@ ADMIN_PASSWORD_HASH=$$2b$$12$$...your-hash-here...
 
 The backend automatically unescapes `$$` → `$` at startup.
 
-### 3. Start PostgreSQL
+### 3. Start MySQL
 
-**Option A — Docker (if port 5432 is free)**
+**Option A — Docker (if port 3306 is free)**
 
 ```bash
 docker compose up -d db
 ```
 
-**Option B — Local PostgreSQL**
+**Option B — Local MySQL**
 
 ```bash
-psql postgres <<'SQL'
-CREATE USER tradeeye WITH PASSWORD 'tradeeye';
-CREATE DATABASE tradeeye OWNER tradeeye;
-GRANT ALL PRIVILEGES ON DATABASE tradeeye TO tradeeye;
+mysql -u root -p <<'SQL'
+CREATE DATABASE tradeeye CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'tradeeye'@'localhost' IDENTIFIED BY 'tradeeye';
+GRANT ALL PRIVILEGES ON tradeeye.* TO 'tradeeye'@'localhost';
+FLUSH PRIVILEGES;
 SQL
 ```
 
 Set `DATABASE_URL` in `.env`:
 
 ```env
-DATABASE_URL=postgresql+asyncpg://tradeeye:tradeeye@localhost:5432/tradeeye
+DATABASE_URL=mysql+aiomysql://tradeeye:tradeeye@localhost:3306/tradeeye?charset=utf8mb4
 ```
 
 ### 4. Run database migrations and seed
 
 ```bash
+# Option A — helper script (from repo root)
+./scripts/migrate.sh upgrade head
+PYTHONPATH=. python backend/scripts/seed.py
+
+# Option B — from backend/ (no PYTHONPATH needed after env.py fix)
 cd backend
-PYTHONPATH=.. alembic upgrade head
+alembic upgrade head
 PYTHONPATH=.. python scripts/seed.py
 cd ..
 ```
@@ -174,7 +180,7 @@ Change these before any production deployment.
 
 ## Docker (full stack)
 
-Run PostgreSQL and the API together:
+Run MySQL and the API together:
 
 ```bash
 cp .env.example .env
@@ -183,7 +189,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The API container uses `DATABASE_URL=postgresql+asyncpg://tradeeye:tradeeye@db:5432/tradeeye` (set in `docker-compose.yml`).
+The API container uses `DATABASE_URL=mysql+aiomysql://tradeeye:tradeeye@db:3306/tradeeye?charset=utf8mb4` (set in `docker-compose.yml`).
 
 After the containers are up, run migrations and seed inside the API container:
 
@@ -192,7 +198,7 @@ docker compose exec api alembic -c backend/alembic.ini upgrade head
 docker compose exec api python backend/scripts/seed.py
 ```
 
-> If port `5432` is already in use on your machine, either stop the local Postgres service or change the host port mapping in `docker-compose.yml`.
+> If port `3306` is already in use on your machine, either stop the local MySQL service or change the host port mapping in `docker-compose.yml`.
 
 ---
 
@@ -351,8 +357,9 @@ Tests cover password hashing, coordinator bars-matching logic, scheduler job reg
 
 | Problem                                                   | Fix                                                                                    |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `ModuleNotFoundError: backend`                            | Run commands with `PYTHONPATH=.` from project root, or `PYTHONPATH=..` from `backend/` |
-| Port 5432 already in use                                  | Stop local Postgres or change Docker port mapping                                      |
+| `ModuleNotFoundError: backend`                            | Run `cd backend && alembic upgrade head`, or `./scripts/migrate.sh upgrade head` from repo root |
+| `No 'script_location' key found`                          | No `alembic.ini` at repo root — run from `backend/` or use `./scripts/migrate.sh`              |
+| Port 3306 already in use                                  | Stop local MySQL or change Docker port mapping                                         |
 | Docker Compose warns about unset variables in bcrypt hash | Escape `$` as `$$` in `ADMIN_PASSWORD_HASH`                                            |
 | `greenlet` required error                                 | `pip install greenlet`                                                                 |
 | `python-multipart` required                               | `pip install python-multipart`                                                         |

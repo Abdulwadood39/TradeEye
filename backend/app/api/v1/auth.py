@@ -28,13 +28,32 @@ from backend.app.schemas.auth import (
     RefreshRequest,
     ResendVerificationRequest,
     ResetPasswordRequest,
+    SignupOptionsResponse,
     SignupRequest,
     TokenResponse,
     UserResponse,
 )
+from backend.app.schemas.enums import (
+    PRIMARY_MARKET_LABELS,
+    TRADING_STYLE_LABELS,
+    PrimaryMarket,
+    TradingStyle,
+)
 from backend.app.core.limiter import limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/signup-options", response_model=SignupOptionsResponse)
+async def signup_options() -> SignupOptionsResponse:
+    return SignupOptionsResponse(
+        trading_styles=[
+            {"value": style.value, "label": TRADING_STYLE_LABELS[style]} for style in TradingStyle
+        ],
+        primary_markets=[
+            {"value": market.value, "label": PRIMARY_MARKET_LABELS[market]} for market in PrimaryMarket
+        ],
+    )
 
 
 @router.post("/signup", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
@@ -44,7 +63,13 @@ async def signup(request: Request, body: SignupRequest, db: AsyncSession = Depen
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
-    user = User(email=body.email.lower(), password_hash=hash_password(body.password))
+    user = User(
+        email=body.email.lower(),
+        password_hash=hash_password(body.password),
+        full_name=body.full_name,
+        trading_style=body.trading_style.value,
+        primary_market=body.primary_market.value,
+    )
     db.add(user)
     await db.flush()
 
@@ -185,5 +210,5 @@ async def reset_password(
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(user: User = Depends(get_current_user)) -> User:
-    return user
+async def me(user: User = Depends(get_current_user)) -> UserResponse:
+    return UserResponse.from_user(user)

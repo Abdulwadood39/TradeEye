@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ libpq-dev \
+    gcc g++ \
     && rm -rf /var/lib/apt/lists/*
 
 COPY trend_scanner/requirements.txt /app/trend_scanner/requirements.txt

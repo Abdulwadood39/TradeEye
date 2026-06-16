@@ -4,11 +4,10 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import DateTime, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.app.db.base import Base, TimestampMixin, uuid_pk
+from backend.app.db.base import Base, TimestampMixin, uuid_fk, uuid_pk
 
 
 class Plan(TimestampMixin, Base):
@@ -29,8 +28,8 @@ class Subscription(TimestampMixin, Base):
     __tablename__ = "subscriptions"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), unique=True, nullable=False)
-    plan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("plans.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = uuid_fk("users.id", unique=True, nullable=False)
+    plan_id: Mapped[uuid.UUID] = uuid_fk("plans.id", nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
     provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     provider_customer_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
@@ -46,5 +45,5 @@ class BillingEvent(TimestampMixin, Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

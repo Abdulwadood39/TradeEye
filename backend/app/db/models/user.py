@@ -4,11 +4,10 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, DateTime, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from backend.app.db.base import Base, TimestampMixin, uuid_pk
+from backend.app.db.base import Base, TimestampMixin, uuid_fk, uuid_pk
 
 
 class User(TimestampMixin, Base):
@@ -17,6 +16,9 @@ class User(TimestampMixin, Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    trading_style: Mapped[str] = mapped_column(String(32), nullable=False)
+    primary_market: Mapped[str] = mapped_column(String(32), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     email_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -30,7 +32,7 @@ class EmailVerificationToken(TimestampMixin, Base):
     __tablename__ = "email_verification_tokens"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = uuid_fk("users.id", nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -40,7 +42,7 @@ class PasswordResetToken(TimestampMixin, Base):
     __tablename__ = "password_reset_tokens"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = uuid_fk("users.id", nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -53,12 +55,10 @@ class UserSubscription(TimestampMixin, Base):
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    ticker_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tickers.id"), nullable=False)
-    timeframe_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("timeframes.id"), nullable=False)
-    indicator_type_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("indicator_types.id"), nullable=False
-    )
+    user_id: Mapped[uuid.UUID] = uuid_fk("users.id", nullable=False)
+    ticker_id: Mapped[uuid.UUID] = uuid_fk("tickers.id", nullable=False)
+    timeframe_id: Mapped[uuid.UUID] = uuid_fk("timeframes.id", nullable=False)
+    indicator_type_id: Mapped[uuid.UUID] = uuid_fk("indicator_types.id", nullable=False)
     bars: Mapped[int] = mapped_column(Integer, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
@@ -68,9 +68,7 @@ class UserSubscription(TimestampMixin, Base):
 class UserNotificationSettings(TimestampMixin, Base):
     __tablename__ = "user_notification_settings"
 
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True
-    )
+    user_id: Mapped[uuid.UUID] = uuid_fk("users.id", primary_key=True)
     discord_webhook_url_enc: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     telegram_bot_token_enc: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     telegram_chat_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)

@@ -1,19 +1,22 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: mysql:8.4
     environment:
-      POSTGRES_USER: tradeeye
-      POSTGRES_PASSWORD: tradeeye
-      POSTGRES_DB: tradeeye
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: tradeeye
+      MYSQL_USER: tradeeye
+      MYSQL_PASSWORD: tradeeye
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - mysqldata:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tradeeye"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
 
   api:
     build:
@@ -24,7 +27,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://tradeeye:tradeeye@db:5432/tradeeye
+      DATABASE_URL: mysql+aiomysql://tradeeye:tradeeye@db:3306/tradeeye?charset=utf8mb4
     depends_on:
       db:
         condition: service_healthy
@@ -34,5 +37,5 @@ services:
       - chart_tmp:/tmp/tradeeye/charts
 
 volumes:
-  pgdata:
+  mysqldata:
   chart_tmp:

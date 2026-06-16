@@ -27,8 +27,9 @@ class Settings(BaseSettings):
 
     app_name: str = "TradeEye API"
     debug: bool = False
+    seed_dev_user: bool = False
 
-    database_url: str = "postgresql+asyncpg://tradeeye:tradeeye@localhost:5432/tradeeye"
+    database_url: str = "mysql+aiomysql://tradeeye:tradeeye@localhost:3306/tradeeye?charset=utf8mb4"
 
     jwt_secret_key: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"

@@ -10,5 +10,5 @@ router = APIRouter(prefix="/me", tags=["me"])
 
 
 @router.get("", response_model=UserResponse)
-async def get_profile(user: User = Depends(get_verified_user)) -> User:
-    return user
+async def get_profile(user: User = Depends(get_verified_user)) -> UserResponse:
+    return UserResponse.from_user(user)
