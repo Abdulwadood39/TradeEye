@@ -62,7 +62,12 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> List[str]:
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        origins: list[str] = []
+        for origin in self.cors_origins.split(","):
+            origin = origin.strip().rstrip("/")
+            if origin:
+                origins.append(origin)
+        return origins
 
     @model_validator(mode="after")
     def unescape_bcrypt_hash(self) -> "Settings":
