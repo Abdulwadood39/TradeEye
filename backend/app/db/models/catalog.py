@@ -4,10 +4,11 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.db.base import Base, TimestampMixin, uuid_fk, uuid_pk
+from backend.app.db.types import UTCDateTime
 
 
 class Ticker(TimestampMixin, Base):
@@ -36,8 +37,8 @@ class TimeframeScanSchedule(TimestampMixin, Base):
     timeframe_id: Mapped[uuid.UUID] = uuid_fk("timeframes.id", unique=True, nullable=False)
     interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    last_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_started_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)
+    next_run_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class IndicatorType(TimestampMixin, Base):

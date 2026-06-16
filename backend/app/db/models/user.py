@@ -4,10 +4,11 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.db.base import Base, TimestampMixin, uuid_fk, uuid_pk
+from backend.app.db.types import UTCDateTime
 
 
 class User(TimestampMixin, Base):
@@ -20,7 +21,7 @@ class User(TimestampMixin, Base):
     trading_style: Mapped[str] = mapped_column(String(32), nullable=False)
     primary_market: Mapped[str] = mapped_column(String(32), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    email_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    email_verified_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)
 
     subscriptions: Mapped[list["UserSubscription"]] = relationship(back_populates="user")
     notification_settings: Mapped[Optional["UserNotificationSettings"]] = relationship(
@@ -34,8 +35,8 @@ class EmailVerificationToken(TimestampMixin, Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     user_id: Mapped[uuid.UUID] = uuid_fk("users.id", nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    used_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class PasswordResetToken(TimestampMixin, Base):
@@ -44,8 +45,8 @@ class PasswordResetToken(TimestampMixin, Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     user_id: Mapped[uuid.UUID] = uuid_fk("users.id", nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    used_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class UserSubscription(TimestampMixin, Base):

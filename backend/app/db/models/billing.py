@@ -4,10 +4,11 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import DateTime, Integer, JSON, String
+from sqlalchemy import Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.db.base import Base, TimestampMixin, uuid_fk, uuid_pk
+from backend.app.db.types import UTCDateTime
 
 
 class Plan(TimestampMixin, Base):
@@ -34,9 +35,9 @@ class Subscription(TimestampMixin, Base):
     provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     provider_customer_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     provider_subscription_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    current_period_start: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    current_period_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    canceled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_period_start: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)
+    current_period_end: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)
+    canceled_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)
 
 
 class BillingEvent(TimestampMixin, Base):
@@ -46,4 +47,4 @@ class BillingEvent(TimestampMixin, Base):
     provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)

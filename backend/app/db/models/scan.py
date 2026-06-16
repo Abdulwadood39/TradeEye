@@ -4,10 +4,11 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.db.base import Base, TimestampMixin, uuid_fk, uuid_pk
+from backend.app.db.types import UTCDateTime
 
 
 class ScanRun(TimestampMixin, Base):
@@ -16,8 +17,8 @@ class ScanRun(TimestampMixin, Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     timeframe_id: Mapped[uuid.UUID] = uuid_fk("timeframes.id", nullable=False)
     indicator_type_id: Mapped[uuid.UUID] = uuid_fk("indicator_types.id", nullable=False)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="running", nullable=False)
     tickers_scanned: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     trends_found: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -42,7 +43,7 @@ class TrendEvent(TimestampMixin, Base):
     bars_scanned: Mapped[int] = mapped_column(Integer, nullable=False)
     score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    scanned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    scanned_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
 
 class NotificationMessage(TimestampMixin, Base):
@@ -56,4 +57,4 @@ class NotificationMessage(TimestampMixin, Base):
     channel: Mapped[str] = mapped_column(String(16), nullable=False)
     external_message_id: Mapped[str] = mapped_column(String(128), nullable=False)
     trend_event_id: Mapped[Optional[uuid.UUID]] = uuid_fk("trend_events.id", nullable=True)
-    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
