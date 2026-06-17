@@ -57,7 +57,7 @@ async def list_trends(
         )
 
     from sqlalchemy import or_
-    base = select(TrendEvent).where(or_(*conditions))
+    base = select(TrendEvent).where(or_(*conditions), TrendEvent.direction.in_(["UP", "DOWN"]))
     if direction:
         base = base.where(TrendEvent.direction == direction.upper())
     if from_:
