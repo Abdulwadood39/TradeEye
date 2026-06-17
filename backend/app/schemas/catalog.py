@@ -43,6 +43,20 @@ class SubscriptionCreate(BaseModel):
     bars: int = Field(ge=50, le=10000)
 
 
+class SubscriptionBulkCreate(BaseModel):
+    ticker_ids: list[UUID] = Field(min_length=1)
+    timeframe_id: UUID
+    indicator_type_id: UUID
+    bars: int | None = Field(default=None, ge=50, le=10000)
+
+
+class SubscriptionBulkResponse(BaseModel):
+    created: list[SubscriptionResponse]
+    skipped_ticker_ids: list[UUID]
+    created_count: int
+    skipped_count: int
+
+
 class SubscriptionUpdate(BaseModel):
     bars: Optional[int] = Field(default=None, ge=50, le=10000)
     is_active: Optional[bool] = None

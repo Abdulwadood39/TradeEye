@@ -13,9 +13,26 @@ from backend.app.db.models.billing import Plan, Subscription
 from backend.app.db.models.catalog import IndicatorType, Ticker, Timeframe
 from backend.app.db.models.user import User, UserSubscription
 from backend.app.db.session import get_db
-from backend.app.schemas.catalog import SubscriptionCreate, SubscriptionResponse, SubscriptionUpdate
+from backend.app.schemas.catalog import (
+    SubscriptionBulkCreate,
+    SubscriptionBulkResponse,
+    SubscriptionCreate,
+    SubscriptionResponse,
+    SubscriptionUpdate,
+)
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"], dependencies=[Depends(get_verified_user)])
+
+
+async def _enrich_subscription(sub: UserSubscription, db: AsyncSession) -> SubscriptionResponse:
+    ticker = (await db.execute(select(Ticker).where(Ticker.id == sub.ticker_id))).scalar_one()
+    tf = (await db.execute(select(Timeframe).where(Timeframe.id == sub.timeframe_id))).scalar_one()
+    ind = (await db.execute(select(IndicatorType).where(IndicatorType.id == sub.indicator_type_id))).scalar_one()
+    resp = SubscriptionResponse.model_validate(sub)
+    resp.ticker = ticker
+    resp.timeframe = tf
+    resp.indicator = ind
+    return resp
 
 
 async def _check_plan_limits(user: User, db: AsyncSession) -> Plan:
@@ -42,17 +59,7 @@ async def list_subscriptions(
         )
     )
     subs = list(result.scalars().all())
-    enriched = []
-    for sub in subs:
-        ticker = (await db.execute(select(Ticker).where(Ticker.id == sub.ticker_id))).scalar_one()
-        tf = (await db.execute(select(Timeframe).where(Timeframe.id == sub.timeframe_id))).scalar_one()
-        ind = (await db.execute(select(IndicatorType).where(IndicatorType.id == sub.indicator_type_id))).scalar_one()
-        resp = SubscriptionResponse.model_validate(sub)
-        resp.ticker = ticker
-        resp.timeframe = tf
-        resp.indicator = ind
-        enriched.append(resp)
-    return enriched
+    return [await _enrich_subscription(sub, db) for sub in subs]
 
 
 @router.post("", response_model=SubscriptionResponse, status_code=status.HTTP_201_CREATED)
@@ -96,15 +103,89 @@ async def create_subscription(
     )
     db.add(sub)
     await db.flush()
+    return await _enrich_subscription(sub, db)
 
-    ticker = (await db.execute(select(Ticker).where(Ticker.id == sub.ticker_id))).scalar_one()
-    tf = (await db.execute(select(Timeframe).where(Timeframe.id == sub.timeframe_id))).scalar_one()
-    ind = (await db.execute(select(IndicatorType).where(IndicatorType.id == sub.indicator_type_id))).scalar_one()
-    resp = SubscriptionResponse.model_validate(sub)
-    resp.ticker = ticker
-    resp.timeframe = tf
-    resp.indicator = ind
-    return resp
+
+@router.post("/bulk", response_model=SubscriptionBulkResponse, status_code=status.HTTP_201_CREATED)
+async def create_subscriptions_bulk(
+    body: SubscriptionBulkCreate,
+    user: User = Depends(get_verified_user),
+    db: AsyncSession = Depends(get_db),
+) -> SubscriptionBulkResponse:
+    plan = await _check_plan_limits(user, db)
+    unique_ticker_ids = list(dict.fromkeys(body.ticker_ids))
+
+    tf = (
+        await db.execute(
+            select(Timeframe).where(Timeframe.id == body.timeframe_id, Timeframe.is_active.is_(True))
+        )
+    ).scalar_one_or_none()
+    if tf is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="timeframes not found")
+
+    indicator = (
+        await db.execute(
+            select(IndicatorType).where(
+                IndicatorType.id == body.indicator_type_id, IndicatorType.is_active.is_(True)
+            )
+        )
+    ).scalar_one_or_none()
+    if indicator is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="indicator_types not found")
+
+    tickers_result = await db.execute(
+        select(Ticker).where(Ticker.id.in_(unique_ticker_ids), Ticker.is_active.is_(True))
+    )
+    tickers_by_id = {t.id: t for t in tickers_result.scalars().all()}
+    missing_ticker_ids = [tid for tid in unique_ticker_ids if tid not in tickers_by_id]
+    if missing_ticker_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "tickers not found", "ticker_ids": [str(tid) for tid in missing_ticker_ids]},
+        )
+
+    existing_result = await db.execute(
+        select(UserSubscription.ticker_id).where(
+            UserSubscription.user_id == user.id,
+            UserSubscription.timeframe_id == body.timeframe_id,
+            UserSubscription.indicator_type_id == body.indicator_type_id,
+            UserSubscription.ticker_id.in_(unique_ticker_ids),
+        )
+    )
+    existing_ticker_ids = set(existing_result.scalars().all())
+
+    count_result = await db.execute(
+        select(func.count()).select_from(UserSubscription).where(
+            UserSubscription.user_id == user.id, UserSubscription.is_active.is_(True)
+        )
+    )
+    active_count = count_result.scalar() or 0
+    to_create_ids = [tid for tid in unique_ticker_ids if tid not in existing_ticker_ids]
+    if active_count + len(to_create_ids) > plan.max_subscriptions:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Subscription limit reached")
+
+    bars = body.bars or get_settings().default_subscription_bars
+    created_subs: list[UserSubscription] = []
+    for ticker_id in to_create_ids:
+        sub = UserSubscription(
+            user_id=user.id,
+            ticker_id=ticker_id,
+            timeframe_id=body.timeframe_id,
+            indicator_type_id=body.indicator_type_id,
+            bars=bars,
+        )
+        db.add(sub)
+        created_subs.append(sub)
+
+    await db.flush()
+    created = [await _enrich_subscription(sub, db) for sub in created_subs]
+    skipped = [tid for tid in unique_ticker_ids if tid in existing_ticker_ids]
+    return SubscriptionBulkResponse(
+        created=created,
+        skipped_ticker_ids=skipped,
+        created_count=len(created),
+        skipped_count=len(skipped),
+    )
 
 
 @router.patch("/{subscription_id}", response_model=SubscriptionResponse)
@@ -127,14 +208,7 @@ async def update_subscription(
     if body.is_active is not None:
         sub.is_active = body.is_active
     await db.flush()
-    ticker = (await db.execute(select(Ticker).where(Ticker.id == sub.ticker_id))).scalar_one()
-    tf = (await db.execute(select(Timeframe).where(Timeframe.id == sub.timeframe_id))).scalar_one()
-    ind = (await db.execute(select(IndicatorType).where(IndicatorType.id == sub.indicator_type_id))).scalar_one()
-    resp = SubscriptionResponse.model_validate(sub)
-    resp.ticker = ticker
-    resp.timeframe = tf
-    resp.indicator = ind
-    return resp
+    return await _enrich_subscription(sub, db)
 
 
 @router.delete("/{subscription_id}", status_code=status.HTTP_204_NO_CONTENT)

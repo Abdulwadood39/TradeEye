@@ -13,10 +13,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from sqlalchemy import select
 
 from backend.app.core.config import get_settings
+from backend.app.core.encryption import encrypt_value
 from backend.app.core.security import hash_password
 from backend.app.db.models.billing import Plan, Subscription
 from backend.app.db.models.catalog import IndicatorType, Ticker, Timeframe, TimeframeScanSchedule
-from backend.app.db.models.user import User
+from backend.app.db.models.user import User, UserNotificationSettings, UserSubscription
 from backend.app.db.session import async_session_factory, engine
 from backend.app.db.base import Base
 from trend_scanner.config.tickers import (
@@ -75,6 +76,96 @@ TIMEFRAMES = [
 
 DEV_USER_EMAIL = "admin@tradepulse.com"
 DEV_USER_PASSWORD = "admin123"
+ADMIN_PLAN_SLUG = "admin"
+ADMIN_TIMEFRAME_CODES = ("1m", "1h")
+
+
+def _admin_discord_webhook_url() -> str | None:
+    return os.getenv("SEED_ADMIN_DISCORD_WEBHOOK_URL") or os.getenv("DISCORD_WEBHOOK_URL")
+
+
+async def _ensure_admin_plan(db) -> Plan:
+    plan = (await db.execute(select(Plan).where(Plan.slug == ADMIN_PLAN_SLUG))).scalar_one_or_none()
+    if plan is None:
+        plan = Plan(
+            slug=ADMIN_PLAN_SLUG,
+            name="Admin Plan",
+            max_subscriptions=1000,
+            max_timeframes=8,
+            price_cents=0,
+            currency="USD",
+            billing_interval="month",
+        )
+        db.add(plan)
+        await db.flush()
+    return plan
+
+
+async def _seed_admin_subscriptions(db, user: User) -> None:
+    indicator = (
+        await db.execute(select(IndicatorType).where(IndicatorType.slug == "continuous_trend"))
+    ).scalar_one()
+    timeframes = list(
+        (
+            await db.execute(
+                select(Timeframe).where(Timeframe.code.in_(ADMIN_TIMEFRAME_CODES), Timeframe.is_active.is_(True))
+            )
+        ).scalars()
+    )
+    tickers = list((await db.execute(select(Ticker).where(Ticker.is_active.is_(True)))).scalars())
+    if not timeframes or not tickers:
+        print("  Skipping admin subscriptions (no tickers or timeframes)")
+        return
+
+    existing = set(
+        (
+            await db.execute(
+                select(
+                    UserSubscription.ticker_id,
+                    UserSubscription.timeframe_id,
+                ).where(UserSubscription.user_id == user.id)
+            )
+        ).all()
+    )
+
+    bars = get_settings().default_subscription_bars
+    created = 0
+    for timeframe in timeframes:
+        for ticker in tickers:
+            key = (ticker.id, timeframe.id)
+            if key in existing:
+                continue
+            db.add(
+                UserSubscription(
+                    user_id=user.id,
+                    ticker_id=ticker.id,
+                    timeframe_id=timeframe.id,
+                    indicator_type_id=indicator.id,
+                    bars=bars,
+                )
+            )
+            created += 1
+
+    print(f"  Admin subscriptions: {created} created ({len(tickers)} tickers x {len(timeframes)} timeframes)")
+
+
+async def _seed_admin_notifications(db, user: User) -> None:
+    webhook_url = _admin_discord_webhook_url()
+    if not webhook_url:
+        print("  Skipping admin Discord webhook (set DISCORD_WEBHOOK_URL or SEED_ADMIN_DISCORD_WEBHOOK_URL)")
+        return
+
+    settings = (
+        await db.execute(select(UserNotificationSettings).where(UserNotificationSettings.user_id == user.id))
+    ).scalar_one_or_none()
+    if settings is None:
+        settings = UserNotificationSettings(user_id=user.id)
+        db.add(settings)
+
+    settings.discord_webhook_url_enc = encrypt_value(webhook_url)
+    settings.preferred_channel = "discord"
+    settings.delete_previous_messages = True
+    print("  Admin Discord notifications configured")
 
 
 def _should_seed_dev_user() -> bool:
@@ -107,13 +198,17 @@ async def _seed_dev_user(db) -> None:
         user.email_verified_at = user.email_verified_at or datetime.now(timezone.utc)
         print(f"  Dev user already exists: {DEV_USER_EMAIL}")
 
-    plan = (await db.execute(select(Plan).where(Plan.slug == "free"))).scalar_one_or_none()
-    if plan:
-        billing_sub = (
-            await db.execute(select(Subscription).where(Subscription.user_id == user.id))
-        ).scalar_one_or_none()
-        if billing_sub is None:
-            db.add(Subscription(user_id=user.id, plan_id=plan.id, status="active"))
+    plan = await _ensure_admin_plan(db)
+    billing_sub = (
+        await db.execute(select(Subscription).where(Subscription.user_id == user.id))
+    ).scalar_one_or_none()
+    if billing_sub is None:
+        db.add(Subscription(user_id=user.id, plan_id=plan.id, status="active"))
+    else:
+        billing_sub.plan_id = plan.id
+
+    await _seed_admin_subscriptions(db, user)
+    await _seed_admin_notifications(db, user)
 
 
 async def seed() -> None:

@@ -35,3 +35,4 @@ httpx>=0.28.0
 # trend_scanner engine deps
 -r ../trend_scanner/requirements.txt
 python-dotenv>=1.0.0
+ccxt
