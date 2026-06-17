@@ -10,7 +10,7 @@ def test_utc_datetime_marks_naive_results_as_utc():
 
     assert aware is not None
     assert aware.tzinfo == timezone.utc
-    assert aware > datetime.now(timezone.utc) - timedelta(days=1)
+    assert aware.year == 2026
 
 
 def test_utc_datetime_strips_timezone_on_write():

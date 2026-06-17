@@ -15,7 +15,7 @@ from backend.app.db.models.user import User, UserSubscription
 from backend.app.db.session import get_db
 from backend.app.schemas.catalog import TrendItemResponse, TrendListResponse
 
-router = APIRouter(prefix="/trends", tags=["trends"])
+router = APIRouter(prefix="/trends", tags=["trends"], dependencies=[Depends(get_verified_user)])
 
 
 @router.get("", response_model=TrendListResponse)

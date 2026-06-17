@@ -16,6 +16,7 @@ from backend.app.core.security import (
     generate_token,
     hash_password,
     hash_token,
+    parse_uuid,
     verify_password,
 )
 from backend.app.db.models.billing import Plan, Subscription
@@ -32,6 +33,7 @@ from backend.app.schemas.auth import (
     SignupRequest,
     TokenResponse,
     UserResponse,
+    VerifyEmailRequest,
 )
 from backend.app.schemas.enums import (
     PRIMARY_MARKET_LABELS,
@@ -42,6 +44,15 @@ from backend.app.schemas.enums import (
 from backend.app.core.limiter import limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _token_response_for_user(user: User) -> TokenResponse:
+    sub = str(user.id)
+    return TokenResponse(
+        access_token=create_access_token(sub),
+        refresh_token=create_refresh_token(sub),
+        user=UserResponse.from_user(user),
+    )
 
 
 @router.get("/signup-options", response_model=SignupOptionsResponse)
@@ -56,9 +67,9 @@ async def signup_options() -> SignupOptionsResponse:
     )
 
 
-@router.post("/signup", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
-async def signup(request: Request, body: SignupRequest, db: AsyncSession = Depends(get_db)) -> MessageResponse:
+async def signup(request: Request, body: SignupRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
     existing = await db.execute(select(User).where(User.email == body.email.lower()))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
@@ -88,12 +99,12 @@ async def signup(request: Request, body: SignupRequest, db: AsyncSession = Depen
         )
     )
     await db.commit()
+    await db.refresh(user)
     await send_verification_email(user.email, raw_token)
-    return MessageResponse(message="Account created. Please check your email to verify your account.")
+    return _token_response_for_user(user)
 
 
-@router.get("/verify-email", response_model=MessageResponse)
-async def verify_email(token: str, db: AsyncSession = Depends(get_db)) -> MessageResponse:
+async def _verify_email_with_token(token: str, db: AsyncSession) -> User:
     token_hash = hash_token(token)
     result = await db.execute(
         select(EmailVerificationToken).where(
@@ -110,7 +121,21 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db)) -> Messag
     user.email_verified_at = datetime.now(timezone.utc)
     record.used_at = datetime.now(timezone.utc)
     await db.commit()
-    return MessageResponse(message="Email verified successfully. You can now log in.")
+    return user
+
+
+@router.get("/verify-email", response_model=TokenResponse)
+async def verify_email(token: str, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+    user = await _verify_email_with_token(token, db)
+    await db.refresh(user)
+    return _token_response_for_user(user)
+
+
+@router.post("/verify-email", response_model=TokenResponse)
+async def verify_email_post(body: VerifyEmailRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+    user = await _verify_email_with_token(body.token, db)
+    await db.refresh(user)
+    return _token_response_for_user(user)
 
 
 @router.post("/resend-verification", response_model=MessageResponse)
@@ -142,17 +167,11 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
     user = result.scalar_one_or_none()
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    if user.email_verified_at is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "EMAIL_NOT_VERIFIED", "message": "Please verify your email"},
-        )
-    sub = str(user.id)
-    return TokenResponse(access_token=create_access_token(sub), refresh_token=create_refresh_token(sub))
+    return _token_response_for_user(user)
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(body: RefreshRequest) -> TokenResponse:
+async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
     try:
         payload = decode_token(body.refresh_token)
         if payload.get("type") != "refresh":
@@ -160,7 +179,17 @@ async def refresh(body: RefreshRequest) -> TokenResponse:
         sub = payload["sub"]
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token") from exc
-    return TokenResponse(access_token=create_access_token(sub), refresh_token=create_refresh_token(sub))
+
+    user_id = parse_uuid(sub)
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    return _token_response_for_user(user)
 
 
 @router.post("/forgot-password", response_model=MessageResponse)

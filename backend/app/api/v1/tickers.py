@@ -9,7 +9,7 @@ from backend.app.db.models.catalog import IndicatorType, Ticker, Timeframe
 from backend.app.db.session import get_db
 from backend.app.schemas.catalog import IndicatorResponse, TickerResponse, TimeframeResponse
 
-router = APIRouter(tags=["catalog"])
+router = APIRouter(tags=["catalog"], dependencies=[Depends(get_verified_user)])
 
 
 @router.get("/tickers", response_model=list[TickerResponse])

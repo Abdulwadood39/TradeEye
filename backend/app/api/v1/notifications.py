@@ -10,7 +10,7 @@ from backend.app.db.models.user import User, UserNotificationSettings
 from backend.app.db.session import get_db
 from backend.app.schemas.catalog import NotificationSettingsResponse, NotificationSettingsUpdate
 
-router = APIRouter(prefix="/me/notifications", tags=["notifications"])
+router = APIRouter(prefix="/me/notifications", tags=["notifications"], dependencies=[Depends(get_verified_user)])
 
 
 @router.get("", response_model=NotificationSettingsResponse)

@@ -39,39 +39,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-
-
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-
-class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
-
-
-class ResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str = Field(min_length=8, max_length=128)
-
-
-class ResendVerificationRequest(BaseModel):
-    email: EmailStr
-
-
-class EnumOption(BaseModel):
-    value: str
-    label: str
-
-
-class SignupOptionsResponse(BaseModel):
-    trading_styles: list[EnumOption]
-    primary_markets: list[EnumOption]
-
-
 class UserResponse(BaseModel):
     id: UUID
     email: str
@@ -102,6 +69,44 @@ class UserResponse(BaseModel):
             email_verified_at=user.email_verified_at,
             created_at=user.created_at,
         )
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class EnumOption(BaseModel):
+    value: str
+    label: str
+
+
+class SignupOptionsResponse(BaseModel):
+    trading_styles: list[EnumOption]
+    primary_markets: list[EnumOption]
 
 
 class MessageResponse(BaseModel):

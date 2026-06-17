@@ -15,7 +15,7 @@ from backend.app.db.models.user import User, UserSubscription
 from backend.app.db.session import get_db
 from backend.app.schemas.catalog import SubscriptionCreate, SubscriptionResponse, SubscriptionUpdate
 
-router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
+router = APIRouter(prefix="/subscriptions", tags=["subscriptions"], dependencies=[Depends(get_verified_user)])
 
 
 async def _check_plan_limits(user: User, db: AsyncSession) -> Plan:

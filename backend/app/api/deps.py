@@ -39,10 +39,19 @@ async def get_current_user(
     return user
 
 
+_EMAIL_NOT_VERIFIED_DETAIL = {
+    "code": "EMAIL_NOT_VERIFIED",
+    "message": "Please verify your email",
+}
+
+
 async def get_verified_user(user: Annotated[User, Depends(get_current_user)]) -> User:
+    """Require a verified email for all protected user APIs."""
     if user.email_verified_at is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "EMAIL_NOT_VERIFIED", "message": "Please verify your email"},
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_EMAIL_NOT_VERIFIED_DETAIL)
     return user
+
+
+def raise_if_email_unverified(user: User) -> None:
+    if user.email_verified_at is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_EMAIL_NOT_VERIFIED_DETAIL)
