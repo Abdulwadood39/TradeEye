@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     chart_tmp_dir: str = "/tmp/tradeeye/charts"
     default_subscription_bars: int = 2500
     scan_workers: int = 16
+    vetoes_enabled: bool = True
 
     @property
     def cors_origins_list(self) -> List[str]:
