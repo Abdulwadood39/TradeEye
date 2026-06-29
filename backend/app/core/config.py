@@ -52,6 +52,7 @@ class Settings(BaseSettings):
 
     admin_username: str = "admin"
     admin_password_hash: str = ""  # bcrypt hash
+    admin_test_user_email: str = "admin@tradepulse.com"
     session_secret_key: str = "change-me-session-secret"
 
     cors_origins: str = "http://localhost:3000"
@@ -60,6 +61,10 @@ class Settings(BaseSettings):
     default_subscription_bars: int = 2500
     scan_workers: int = 16
     vetoes_enabled: bool = True
+    sql_echo: bool = False
+    scan_verbose: bool = False
+    log_level: str = "INFO"
+    http_access_log: bool = False
 
     @property
     def cors_origins_list(self) -> List[str]:

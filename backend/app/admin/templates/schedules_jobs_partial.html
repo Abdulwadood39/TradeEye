@@ -1,0 +1,26 @@
+{% if jobs %}
+<table>
+  <thead>
+    <tr>
+      <th>Timeframe</th>
+      <th>Status</th>
+      <th>Progress</th>
+      <th>Trends</th>
+      <th>Started</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for job in jobs %}
+    <tr>
+      <td>{{ job.timeframe_code }}</td>
+      <td>{{ job.status }}</td>
+      <td>{{ job.tickers_done }}/{{ job.tickers_total }} ({{ job.progress_pct }}%)</td>
+      <td>{{ job.trends_found }}</td>
+      <td>{{ job.started_at }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No scans running.</p>
+{% endif %}

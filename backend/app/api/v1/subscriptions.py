@@ -3,7 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -25,6 +25,12 @@ router = APIRouter(prefix="/subscriptions", tags=["subscriptions"], dependencies
 
 
 async def _enrich_subscription(sub: UserSubscription, db: AsyncSession) -> SubscriptionResponse:
+    # After flush(), server defaults (created_at) may be expired; model_validate
+    # would trigger a sync lazy load and raise MissingGreenlet in async SQLAlchemy.
+    state = inspect(sub)
+    if state.persistent and (state.expired or "created_at" in state.unloaded):
+        await db.refresh(sub)
+
     ticker = (await db.execute(select(Ticker).where(Ticker.id == sub.ticker_id))).scalar_one()
     tf = (await db.execute(select(Timeframe).where(Timeframe.id == sub.timeframe_id))).scalar_one()
     ind = (await db.execute(select(IndicatorType).where(IndicatorType.id == sub.indicator_type_id))).scalar_one()

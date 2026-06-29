@@ -14,6 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from backend.app.admin.routes import router as admin_router
 from backend.app.api.v1.router import api_router
 from backend.app.core.config import get_settings
+from backend.app.core.logging_config import configure_logging
 from backend.app.core.limiter import limiter
 from backend.app.db.session import engine
 from backend.app.indicators.registry import init_registry
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    configure_logging()
     settings = get_settings()
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.state.limiter = limiter

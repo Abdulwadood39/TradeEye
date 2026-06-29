@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -16,7 +18,7 @@ from backend.app.db.models.catalog import IndicatorType, Ticker, Timeframe, Time
 from backend.app.db.models.scan import ScanRun
 from backend.app.db.models.user import User, UserSubscription
 from backend.app.db.session import get_db
-from backend.app.services.scan_scheduler import reload_schedule
+from backend.app.services.scan_scheduler import list_running_jobs, reload_schedule, reset_and_run_schedule
 
 templates = Jinja2Templates(directory="backend/app/admin/templates")
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -105,7 +107,43 @@ async def admin_schedules(request: Request, db: AsyncSession = Depends(get_db)) 
             .order_by(Timeframe.code)
         )
     ).all()
-    return templates.TemplateResponse(request, "schedules.html", {"rows": rows})
+    flash = request.query_params.get("flash")
+    return templates.TemplateResponse(
+        request,
+        "schedules.html",
+        {"rows": rows, "flash": flash},
+    )
+
+
+@router.get("/schedules/jobs", response_class=HTMLResponse)
+async def admin_schedule_jobs(request: Request) -> HTMLResponse:
+    require_admin(request)
+    return templates.TemplateResponse(
+        request,
+        "schedules_jobs_partial.html",
+        {"jobs": list_running_jobs()},
+    )
+
+
+@router.post("/schedules/{schedule_id}/run-now")
+async def admin_run_schedule_now(
+    schedule_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    require_admin(request)
+    schedule = (
+        await db.execute(select(TimeframeScanSchedule).where(TimeframeScanSchedule.id == schedule_id))
+    ).scalar_one()
+    result = await reset_and_run_schedule(schedule.timeframe_id)
+    messages = {
+        "started": f"Scan started for schedule {schedule_id}.",
+        "already_running": "That timeframe is already scanning.",
+        "disabled": "Schedule is disabled — enable it first.",
+        "not_found": "Schedule not found.",
+    }
+    flash = messages.get(result, result)
+    return RedirectResponse(f"/admin/schedules?flash={quote(flash)}", status_code=303)
 
 
 @router.post("/schedules/{schedule_id}")

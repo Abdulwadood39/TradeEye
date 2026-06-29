@@ -3,19 +3,32 @@
 {% block content %}
 <h1>Scan Schedules</h1>
 <p>Interval is in minutes. Next run is scheduled from scan <strong>start</strong> time.</p>
+
+{% if flash %}
+<article>{{ flash }}</article>
+{% endif %}
+
+<section>
+  <h2>Running scans</h2>
+  <div id="running-jobs" hx-get="/admin/schedules/jobs" hx-trigger="load, every 3s">
+    {% include "schedules_jobs_partial.html" %}
+  </div>
+</section>
+
 <table>
-  <thead><tr><th>Timeframe</th><th>Interval (min)</th><th>Enabled</th><th>Last Started</th><th>Next Run</th><th></th></tr></thead>
+  <thead><tr><th>Timeframe</th><th>Interval (min)</th><th>Enabled</th><th>Last Started</th><th>Next Run</th><th>Actions</th></tr></thead>
   <tbody>
     {% for schedule, tf in rows %}
     <tr>
       <td>{{ tf.code }}</td>
-      <td colspan="4">
+      <td colspan="5">
         <form method="post" action="/admin/schedules/{{ schedule.id }}" class="grid">
           <input type="number" name="interval_minutes" value="{{ schedule.interval_minutes }}" min="1" required>
           <label><input type="checkbox" name="is_enabled" {% if schedule.is_enabled %}checked{% endif %}> Enabled</label>
           <span>{{ schedule.last_started_at or "—" }}</span>
           <span>{{ schedule.next_run_at or "—" }}</span>
           <button type="submit">Save</button>
+          <button type="submit" formaction="/admin/schedules/{{ schedule.id }}/run-now" formmethod="post">Run now</button>
         </form>
       </td>
     </tr>

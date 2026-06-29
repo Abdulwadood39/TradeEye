@@ -209,7 +209,7 @@ def _fetch_yfinance(
 
             df = normalize(raw, source="yfinance")
             if df is not None and len(df) > 0:
-                logger.info(f"  [OK] {ticker} {timeframe} via yfinance: {len(df)} bars")
+                logger.debug("[OK] %s %s via yfinance: %d bars", ticker, timeframe, len(df))
                 return df
 
         except Exception as e:
@@ -235,6 +235,7 @@ def _get_exchange():
         exchange_class = getattr(ccxt, CFG.data.ccxt_exchange)
         _ccxt_exchange = exchange_class({
             "enableRateLimit": True,
+            "verbose": False,
             "options": {"defaultType": "spot"},
         })
     return _ccxt_exchange
@@ -301,7 +302,7 @@ def _fetch_ccxt(
             )
             df = normalize(df, source="ccxt")
             if df is not None and len(df) > 0:
-                logger.info(f"  [OK] {ticker} ({symbol}) {tf} via CCXT: {len(df)} bars")
+                logger.debug("[OK] %s (%s) %s via CCXT: %d bars", ticker, symbol, tf, len(df))
                 return df
 
         except Exception as e:

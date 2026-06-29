@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class IndicatorResult(BaseModel):
-    direction: Literal["UP", "DOWN", "NONE"]
+    direction: Literal["UP", "DOWN", "NONE", "Vetoed_UP", "Vetoed_DOWN"]
     score: int = 0
     confidence: float = 0.0
     bars_scanned: int = 0

@@ -130,12 +130,13 @@ async def _seed_admin_subscriptions(db, user: User) -> None:
 
     bars = get_settings().default_subscription_bars
     created = 0
+    batch: list[UserSubscription] = []
     for timeframe in timeframes:
         for ticker in tickers:
             key = (ticker.id, timeframe.id)
             if key in existing:
                 continue
-            db.add(
+            batch.append(
                 UserSubscription(
                     user_id=user.id,
                     ticker_id=ticker.id,
@@ -145,6 +146,14 @@ async def _seed_admin_subscriptions(db, user: User) -> None:
                 )
             )
             created += 1
+            if len(batch) >= 100:
+                db.add_all(batch)
+                await db.flush()
+                batch.clear()
+
+    if batch:
+        db.add_all(batch)
+        await db.flush()
 
     print(f"  Admin subscriptions: {created} created ({len(tickers)} tickers x {len(timeframes)} timeframes)")
 
@@ -164,7 +173,7 @@ async def _seed_admin_notifications(db, user: User) -> None:
 
     settings.discord_webhook_url_enc = encrypt_value(webhook_url)
     settings.preferred_channel = "discord"
-    settings.delete_previous_messages = True
+    settings.delete_previous_messages = False
     print("  Admin Discord notifications configured")
 
 
@@ -212,8 +221,10 @@ async def _seed_dev_user(db) -> None:
 
 
 async def seed() -> None:
+    print("==> Creating tables (if missing)")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    print("==> Tables ready")
 
     async with async_session_factory() as db:
         if (await db.execute(select(Plan).where(Plan.slug == "free"))).scalar_one_or_none() is None:
@@ -260,19 +271,34 @@ async def seed() -> None:
                         )
                     )
 
-        async def upsert_ticker(symbol: str, display_name: str, category: str) -> None:
-            existing = (await db.execute(select(Ticker).where(Ticker.yfinance_symbol == symbol))).scalar_one_or_none()
-            if existing is None:
+        async def upsert_tickers(entries: list[tuple[str, str, str]]) -> None:
+            symbols = [symbol for symbol, _, _ in entries]
+            existing_symbols = set(
+                (
+                    await db.execute(select(Ticker.yfinance_symbol).where(Ticker.yfinance_symbol.in_(symbols)))
+                ).scalars()
+            )
+            added = 0
+            for symbol, display_name, category in entries:
+                if symbol in existing_symbols:
+                    continue
                 db.add(Ticker(yfinance_symbol=symbol, display_name=display_name, category=category))
+                added += 1
+            if added:
+                print(f"  Added {added} tickers")
 
+        ticker_entries: list[tuple[str, str, str]] = []
         for symbol in COMMODITY_TICKERS:
-            await upsert_ticker(symbol, COMMODITY_ALIASES.get(symbol, symbol), "commodity")
+            ticker_entries.append((symbol, COMMODITY_ALIASES.get(symbol, symbol), "commodity"))
         for symbol in CRYPTO_TICKERS:
-            await upsert_ticker(symbol, CRYPTO_ALIASES.get(symbol, symbol), "crypto")
+            ticker_entries.append((symbol, CRYPTO_ALIASES.get(symbol, symbol), "crypto"))
         for symbol in FOREX_TICKERS:
-            await upsert_ticker(symbol, _forex_alias(symbol), "forex")
+            ticker_entries.append((symbol, _forex_alias(symbol), "forex"))
         for symbol in STOCKS_INDEX:
-            await upsert_ticker(symbol, _stock_alias(symbol), "stock")
+            ticker_entries.append((symbol, _stock_alias(symbol), "stock"))
+
+        print(f"==> Seeding {len(ticker_entries)} tickers")
+        await upsert_tickers(ticker_entries)
 
         if _should_seed_dev_user():
             print("==> Seeding development user")
@@ -284,5 +310,12 @@ async def seed() -> None:
         print("Seed completed successfully.")
 
 
+async def main() -> None:
+    try:
+        await seed()
+    finally:
+        await engine.dispose()
+
+
 if __name__ == "__main__":
-    asyncio.run(seed())
+    asyncio.run(main())

@@ -39,7 +39,7 @@ class TrendEvent(TimestampMixin, Base):
     ticker_id: Mapped[uuid.UUID] = uuid_fk("tickers.id", nullable=False)
     timeframe_id: Mapped[uuid.UUID] = uuid_fk("timeframes.id", nullable=False)
     indicator_type_id: Mapped[uuid.UUID] = uuid_fk("indicator_types.id", nullable=False)
-    direction: Mapped[str] = mapped_column(String(8), nullable=False)
+    direction: Mapped[str] = mapped_column(String(16), nullable=False)
     bars_scanned: Mapped[int] = mapped_column(Integer, nullable=False)
     score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)

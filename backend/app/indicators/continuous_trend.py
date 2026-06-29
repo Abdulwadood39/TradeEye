@@ -30,12 +30,14 @@ class ContinuousTrendIndicator(BaseIndicator):
         engine = TrendEngine(config=CFG.trend, vetoes_config=vetoes_cfg)
         result = engine.analyze(analysis_df, ticker=ticker, timeframe=timeframe)
 
-        # Score/confidence reflect initial_direction; keep direction aligned so API
-        # alerts and charts match what the signals found (veto_killed stays in metadata).
-        if result.veto_killed and result.initial_direction != "none":
-            result.direction = result.initial_direction
-
-        direction = result.direction.upper() if result.direction != "none" else "NONE"
+        if result.veto_killed and result.initial_direction == "up":
+            direction = "Vetoed_UP"
+        elif result.veto_killed and result.initial_direction == "down":
+            direction = "Vetoed_DOWN"
+        elif result.direction != "none":
+            direction = result.direction.upper()
+        else:
+            direction = "NONE"
         return IndicatorResult(
             direction=direction,
             score=result.score,

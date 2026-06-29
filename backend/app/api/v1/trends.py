@@ -1,21 +1,39 @@
 from __future__ import annotations
 
+import asyncio
+import os
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api.deps import get_verified_user
+from backend.app.api.deps import get_verified_user, is_admin_test_user
 from backend.app.db.models.catalog import Ticker, Timeframe
 from backend.app.db.models.scan import TrendEvent
 from backend.app.db.models.user import User, UserSubscription
 from backend.app.db.session import get_db
 from backend.app.schemas.catalog import TrendItemResponse, TrendListResponse
+from backend.app.schemas.trend_directions import visible_directions_for_user
+from backend.app.services.trend_chart_service import (
+    TrendChartAccessDeniedError,
+    TrendChartGenerationError,
+    TrendChartNotFoundError,
+    build_trend_event_chart,
+    prepare_trend_event_chart,
+)
 
 router = APIRouter(prefix="/trends", tags=["trends"], dependencies=[Depends(get_verified_user)])
+
+
+def _safe_unlink(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 @router.get("", response_model=TrendListResponse)
@@ -56,10 +74,12 @@ async def list_trends(
             & (TrendEvent.bars_scanned == bars_)
         )
 
-    from sqlalchemy import or_
-    base = select(TrendEvent).where(or_(*conditions), TrendEvent.direction.in_(["UP", "DOWN"]))
+    visible = visible_directions_for_user(is_admin_test_user=is_admin_test_user(user))
+    base = select(TrendEvent).where(or_(*conditions), TrendEvent.direction.in_(visible))
     if direction:
-        base = base.where(TrendEvent.direction == direction.upper())
+        if direction not in visible:
+            return TrendListResponse(items=[], total=0, page=page, page_size=page_size)
+        base = base.where(TrendEvent.direction == direction)
     if from_:
         base = base.where(TrendEvent.scanned_at >= from_)
     if to:
@@ -100,3 +120,27 @@ async def list_trends(
         )
 
     return TrendListResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/{event_id}/chart")
+async def get_trend_event_chart(
+    event_id: UUID,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_verified_user),
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    try:
+        chart_input = await prepare_trend_event_chart(db, user=user, event_id=event_id)
+        path = await asyncio.to_thread(build_trend_event_chart, chart_input)
+    except TrendChartNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trend event not found") from exc
+    except TrendChartAccessDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not subscribed to this trend") from exc
+    except TrendChartGenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not generate chart",
+        ) from exc
+
+    background_tasks.add_task(_safe_unlink, path)
+    return FileResponse(path, media_type="image/png", filename=f"trend_{event_id}.png")

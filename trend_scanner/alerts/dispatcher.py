@@ -176,7 +176,7 @@ class DiscordPlatform(BasePlatform):
                 resp.raise_for_status()
                 msg_id = self._extract_msg_id(resp)
                 self._save_msg_id(resp, timeframe)
-                logger.info(f"  \U0001f4e9 Discord [{label}] sent")
+                logger.debug("Discord [%s] sent", label)
                 return True, msg_id
 
             except Exception as e:

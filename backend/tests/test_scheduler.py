@@ -13,7 +13,7 @@ async def test_schedule_next_registers_job():
     run_at = datetime.now(timezone.utc) + timedelta(hours=24)
     scan_scheduler.start_scheduler()
     try:
-        scan_scheduler._schedule_next(tf_id, run_at)
+        scan_scheduler._schedule_next(tf_id, run_at, "1h")
         job = scan_scheduler.scheduler.get_job(scan_scheduler._job_ids[tf_id])
         assert job is not None
         assert job.id == f"scan_{tf_id}"

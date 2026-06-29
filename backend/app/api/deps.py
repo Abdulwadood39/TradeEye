@@ -9,6 +9,7 @@ from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.config import get_settings
 from backend.app.core.security import decode_token, parse_uuid
 from backend.app.db.models.user import User
 from backend.app.db.session import get_db
@@ -55,3 +56,7 @@ async def get_verified_user(user: Annotated[User, Depends(get_current_user)]) ->
 def raise_if_email_unverified(user: User) -> None:
     if user.email_verified_at is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_EMAIL_NOT_VERIFIED_DETAIL)
+
+
+def is_admin_test_user(user: User) -> bool:
+    return user.email.lower() == get_settings().admin_test_user_email.lower()

@@ -7,7 +7,6 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -18,14 +17,14 @@ from backend.app.db.models.scan import ScanRun, TrendEvent
 from backend.app.db.models.user import UserSubscription
 from backend.app.db.session import async_session_factory
 from backend.app.indicators.registry import get as get_indicator, init_registry
+from backend.app.schemas.trend_directions import NOTIFIABLE_TREND_DIRECTIONS, STORABLE_TREND_DIRECTIONS
 from backend.app.services.notification_service import NotificationService
+from backend.app.services.scan_jobs import fail_job, finish_job, is_timeframe_running, start_job, update_progress
 from trend_scanner.charts.generator import generate_chart
 from trend_scanner.data.fetcher import fetch
 from trend_scanner.data.normalizer import slice_last_n
 
 logger = logging.getLogger(__name__)
-
-_running_timeframes: set[UUID] = set()
 
 
 @dataclass
@@ -80,7 +79,7 @@ def _process_group(inp: GroupScanInput) -> list[GroupScanOutput]:
         )
 
         chart_path = None
-        if result.direction in ("UP", "DOWN") and result.raw_result is not None:
+        if result.direction in NOTIFIABLE_TREND_DIRECTIONS and result.raw_result is not None:
             os.makedirs(os.path.join(inp.chart_tmp_dir, str(inp.scan_run_id)), exist_ok=True)
             chart_path = os.path.join(
                 inp.chart_tmp_dir,
@@ -109,15 +108,16 @@ def _process_group(inp: GroupScanInput) -> list[GroupScanOutput]:
 
 class ScanCoordinator:
     async def run_timeframe_scan(self, timeframe_id: UUID) -> None:
-        if timeframe_id in _running_timeframes:
+        if is_timeframe_running(timeframe_id):
             logger.warning("Scan for timeframe %s still running; skipping overlap", timeframe_id)
             return
 
-        _running_timeframes.add(timeframe_id)
         try:
             await self._execute_scan(timeframe_id)
-        finally:
-            _running_timeframes.discard(timeframe_id)
+        except Exception as exc:
+            logger.exception("Scan failed for timeframe %s: %s", timeframe_id, exc)
+            fail_job(timeframe_id, str(exc))
+            raise
 
     async def _execute_scan(self, timeframe_id: UUID) -> None:
         init_registry()
@@ -192,36 +192,48 @@ class ScanCoordinator:
                     )
                 )
 
+            start_job(timeframe_id, timeframe.code, len(scan_inputs))
+
             all_outputs: list[GroupScanOutput] = []
-            with ThreadPoolExecutor(max_workers=settings.scan_workers) as pool:
-                futures = [pool.submit(_process_group, inp) for inp in scan_inputs]
-                for future in as_completed(futures):
-                    try:
-                        all_outputs.extend(future.result())
-                    except Exception as exc:
-                        logger.error("Group scan failed: %s", exc)
+            tickers_done = 0
+            try:
+                with ThreadPoolExecutor(max_workers=settings.scan_workers) as pool:
+                    futures = [pool.submit(_process_group, inp) for inp in scan_inputs]
+                    for future in as_completed(futures):
+                        tickers_done += 1
+                        update_progress(timeframe_id, tickers_done=tickers_done)
+                        try:
+                            all_outputs.extend(future.result())
+                        except Exception as exc:
+                            logger.error("Group scan failed: %s", exc)
 
-            notify_service = NotificationService(db)
-            trends_found = 0
+                notify_service = NotificationService(db)
+                trends_found = 0
 
-            for output in all_outputs:
-                event = TrendEvent(
-                    scan_run_id=scan_run.id,
-                    ticker_id=output.ticker_id,
-                    timeframe_id=timeframe_id,
-                    indicator_type_id=output.indicator_type_id,
-                    direction=output.direction,
-                    bars_scanned=output.bars_scanned,
-                    score=output.score,
-                    confidence=output.confidence,
-                    scanned_at=started_at,
-                )
-                db.add(event)
-                await db.flush()
+                for output in all_outputs:
+                    if output.direction not in STORABLE_TREND_DIRECTIONS:
+                        continue
 
-                if output.direction in ("UP", "DOWN"):
-                    trends_found += 1
+                    event = TrendEvent(
+                        scan_run_id=scan_run.id,
+                        ticker_id=output.ticker_id,
+                        timeframe_id=timeframe_id,
+                        indicator_type_id=output.indicator_type_id,
+                        direction=output.direction,
+                        bars_scanned=output.bars_scanned,
+                        score=output.score,
+                        confidence=output.confidence,
+                        scanned_at=started_at,
+                    )
+                    db.add(event)
+                    await db.flush()
+
+                    if output.direction in NOTIFIABLE_TREND_DIRECTIONS:
+                        trends_found += 1
                     chart_path = output.chart_path
+                    if output.direction not in NOTIFIABLE_TREND_DIRECTIONS:
+                        continue
+
                     try:
                         for user_id in output.matched_user_ids:
                             await notify_service.send_trend_alert(
@@ -245,14 +257,17 @@ class ScanCoordinator:
                             except OSError as exc:
                                 logger.warning("Could not delete chart %s: %s", chart_path, exc)
 
-            scan_run.status = "completed"
-            scan_run.finished_at = datetime.now(timezone.utc)
-            scan_run.tickers_scanned = len(scan_inputs)
-            scan_run.trends_found = trends_found
-            await db.commit()
-            logger.info(
-                "Scan completed for %s: %d tickers, %d trends",
-                timeframe.code,
-                len(scan_inputs),
-                trends_found,
-            )
+                update_progress(timeframe_id, trends_found=trends_found)
+                scan_run.status = "completed"
+                scan_run.finished_at = datetime.now(timezone.utc)
+                scan_run.tickers_scanned = len(scan_inputs)
+                scan_run.trends_found = trends_found
+                await db.commit()
+                logger.info(
+                    "Scan completed for %s: %d tickers, %d trends",
+                    timeframe.code,
+                    len(scan_inputs),
+                    trends_found,
+                )
+            finally:
+                finish_job(timeframe_id)
