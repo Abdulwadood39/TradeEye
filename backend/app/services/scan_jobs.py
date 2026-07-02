@@ -38,6 +38,21 @@ def is_timeframe_running(timeframe_id: UUID) -> bool:
         return timeframe_id in _active
 
 
+def try_begin_job(timeframe_id: UUID, timeframe_code: str, tickers_total: int) -> bool:
+    """Atomically register a scan job; returns False if this timeframe is already running."""
+    with _lock:
+        if timeframe_id in _active:
+            return False
+        _active[timeframe_id] = ScanJobStatus(
+            timeframe_id=timeframe_id,
+            timeframe_code=timeframe_code,
+            status="running",
+            started_at=datetime.now(timezone.utc),
+            tickers_total=tickers_total,
+        )
+        return True
+
+
 def start_job(timeframe_id: UUID, timeframe_code: str, tickers_total: int) -> None:
     with _lock:
         _active[timeframe_id] = ScanJobStatus(

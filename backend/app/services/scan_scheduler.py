@@ -42,6 +42,9 @@ async def _fire_scan(timeframe_id: UUID) -> None:
         next_run = schedule.next_run_at
 
     _schedule_next(timeframe_id, next_run, tf.code)
+    if is_timeframe_running(timeframe_id):
+        logger.warning("Scan for timeframe %s already running; skipping scheduled fire", tf.code)
+        return
     asyncio.create_task(coordinator.run_timeframe_scan(timeframe_id))
 
 

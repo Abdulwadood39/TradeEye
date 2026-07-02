@@ -19,7 +19,7 @@ from backend.app.db.session import async_session_factory
 from backend.app.indicators.registry import get as get_indicator, init_registry
 from backend.app.schemas.trend_directions import NOTIFIABLE_TREND_DIRECTIONS, STORABLE_TREND_DIRECTIONS
 from backend.app.services.notification_service import NotificationService
-from backend.app.services.scan_jobs import fail_job, finish_job, is_timeframe_running, start_job, update_progress
+from backend.app.services.scan_jobs import fail_job, finish_job, try_begin_job, update_progress
 from trend_scanner.charts.generator import generate_chart
 from trend_scanner.data.fetcher import fetch
 from trend_scanner.data.normalizer import slice_last_n
@@ -108,10 +108,6 @@ def _process_group(inp: GroupScanInput) -> list[GroupScanOutput]:
 
 class ScanCoordinator:
     async def run_timeframe_scan(self, timeframe_id: UUID) -> None:
-        if is_timeframe_running(timeframe_id):
-            logger.warning("Scan for timeframe %s still running; skipping overlap", timeframe_id)
-            return
-
         try:
             await self._execute_scan(timeframe_id)
         except Exception as exc:
@@ -152,16 +148,6 @@ class ScanCoordinator:
                         await db.execute(select(IndicatorType).where(IndicatorType.id == sub.indicator_type_id))
                     ).scalar_one()
 
-            started_at = datetime.now(timezone.utc)
-            scan_run = ScanRun(
-                timeframe_id=timeframe_id,
-                indicator_type_id=subscriptions[0].indicator_type_id,
-                started_at=started_at,
-                status="running",
-            )
-            db.add(scan_run)
-            await db.flush()
-
             groups: dict[tuple, list[UserSubscription]] = defaultdict(list)
             for sub in subscriptions:
                 key = (sub.ticker_id, sub.timeframe_id, sub.indicator_type_id)
@@ -187,12 +173,27 @@ class ScanCoordinator:
                         unique_bars=sorted(set(bars_list)),
                         max_bars=max(bars_list),
                         users_by_bars=dict(users_by_bars),
-                        scan_run_id=scan_run.id,
+                        scan_run_id=UUID(int=0),  # set after scan_run is created
                         chart_tmp_dir=settings.chart_tmp_dir,
                     )
                 )
 
-            start_job(timeframe_id, timeframe.code, len(scan_inputs))
+            if not try_begin_job(timeframe_id, timeframe.code, len(scan_inputs)):
+                logger.warning("Scan for timeframe %s still running; skipping overlap", timeframe.code)
+                return
+
+            started_at = datetime.now(timezone.utc)
+            scan_run = ScanRun(
+                timeframe_id=timeframe_id,
+                indicator_type_id=subscriptions[0].indicator_type_id,
+                started_at=started_at,
+                status="running",
+            )
+            db.add(scan_run)
+            await db.flush()
+
+            for inp in scan_inputs:
+                inp.scan_run_id = scan_run.id
 
             all_outputs: list[GroupScanOutput] = []
             tickers_done = 0

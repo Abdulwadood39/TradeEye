@@ -111,6 +111,8 @@ class NotificationService:
             if channel == "discord":
                 webhook = decrypt_value(settings.discord_webhook_url_enc)
                 if not webhook:
+                    if settings.discord_webhook_url_enc:
+                        logger.warning("Discord webhook configured for user %s but could not be decrypted", user_id)
                     continue
                 platform = DiscordPlatform(webhook)
                 success, msg_id = platform.send_alert_with_id(result)

@@ -112,3 +112,23 @@ class TrendListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class ScannerStatusItem(BaseModel):
+    timeframe: str
+    is_enabled: bool
+    is_running: bool
+    progress_pct: int
+    last_started_at: datetime | None
+    next_run_at: datetime | None
+    last_scan_status: str | None
+    last_tickers_scanned: int
+    last_trends_found: int
+
+
+class UserKpiResponse(BaseModel):
+    total_signals_today: int
+    uptrend_detected_today: int
+    downtrend_detected_today: int
+    active_subscribed_pairs: int
+    scanner_status: list[ScannerStatusItem]

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api.deps import get_current_user
+from backend.app.api.deps import get_current_user, get_verified_user
 from backend.app.core.config import get_settings
 from backend.app.core.email import send_password_reset_email, send_verification_email
 from backend.app.core.security import (
@@ -23,6 +23,7 @@ from backend.app.db.models.billing import Plan, Subscription
 from backend.app.db.models.user import EmailVerificationToken, PasswordResetToken, User
 from backend.app.db.session import get_db
 from backend.app.schemas.auth import (
+    ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
     MessageResponse,
@@ -236,6 +237,24 @@ async def reset_password(
     record.used_at = datetime.now(timezone.utc)
     await db.commit()
     return MessageResponse(message="Password reset successfully.")
+
+
+@router.post("/change-password", response_model=MessageResponse)
+@limiter.limit("5/minute")
+async def change_password(
+    request: Request,
+    body: ChangePasswordRequest,
+    user: User = Depends(get_verified_user),
+    db: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    if verify_password(body.new_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must be different")
+
+    user.password_hash = hash_password(body.new_password)
+    await db.commit()
+    return MessageResponse(message="Password updated successfully.")
 
 
 @router.get("/me", response_model=UserResponse)
