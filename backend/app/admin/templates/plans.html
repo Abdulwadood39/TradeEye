@@ -3,7 +3,7 @@
 {% block content %}
 <h1>Billing Plans</h1>
 <table>
-  <thead><tr><th>Slug</th><th>Name</th><th>Max Subs</th><th>Max TF</th><th>Price</th><th>Active</th></tr></thead>
+  <thead><tr><th>Slug</th><th>Name</th><th>Max Subs</th><th>Max TF</th><th>Price</th><th>Whop Plan</th><th>Active</th></tr></thead>
   <tbody>
     {% for p in plans %}
     <tr>
@@ -12,6 +12,7 @@
       <td>{{ p.max_subscriptions }}</td>
       <td>{{ p.max_timeframes }}</td>
       <td>{{ p.price_cents / 100 }} {{ p.currency }}/{{ p.billing_interval }}</td>
+      <td>{{ p.whop_plan_id or "—" }}</td>
       <td>{{ "Yes" if p.is_active else "No" }}</td>
     </tr>
     {% endfor %}

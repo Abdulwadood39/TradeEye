@@ -40,6 +40,19 @@ class Settings(BaseSettings):
 
     frontend_url: str = "http://localhost:3000"
 
+    whop_api_key: str = ""
+    whop_company_id: str = ""
+    whop_webhook_secret: str = ""
+    whop_billing_success_path: str = "/billing/success"
+
+    @property
+    def whop_configured(self) -> bool:
+        return bool(self.whop_api_key and self.whop_company_id and self.whop_webhook_secret)
+
+    @property
+    def whop_billing_success_url(self) -> str:
+        return f"{self.frontend_url.rstrip('/')}{self.whop_billing_success_path}"
+
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""

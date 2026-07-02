@@ -77,11 +77,38 @@ TIMEFRAMES = [
 DEV_USER_EMAIL = "admin@tradepulse.com"
 DEV_USER_PASSWORD = "admin123"
 ADMIN_PLAN_SLUG = "admin"
+PRO_PLAN_SLUG = "pro"
+PRO_WHOP_PLAN_ID = "plan_ZUwmW7PbwcLEF"
 ADMIN_TIMEFRAME_CODES = ("1m", "1h")
 
 
 def _admin_discord_webhook_url() -> str | None:
     return os.getenv("SEED_ADMIN_DISCORD_WEBHOOK_URL") or os.getenv("DISCORD_WEBHOOK_URL")
+
+
+async def _ensure_pro_plan(db) -> Plan:
+    plan = (await db.execute(select(Plan).where(Plan.slug == PRO_PLAN_SLUG))).scalar_one_or_none()
+    if plan is None:
+        plan = Plan(
+            slug=PRO_PLAN_SLUG,
+            name="Pro",
+            max_subscriptions=100,
+            max_timeframes=8,
+            price_cents=999,
+            currency="USD",
+            billing_interval="month",
+            whop_plan_id=PRO_WHOP_PLAN_ID,
+        )
+        db.add(plan)
+        await db.flush()
+    else:
+        plan.name = "Pro"
+        plan.max_subscriptions = 100
+        plan.max_timeframes = 8
+        plan.price_cents = 999
+        plan.whop_plan_id = PRO_WHOP_PLAN_ID
+        plan.is_active = True
+    return plan
 
 
 async def _ensure_admin_plan(db) -> Plan:
@@ -239,6 +266,8 @@ async def seed() -> None:
                     billing_interval="month",
                 )
             )
+
+        await _ensure_pro_plan(db)
 
         if (await db.execute(select(IndicatorType).where(IndicatorType.slug == "continuous_trend"))).scalar_one_or_none() is None:
             db.add(

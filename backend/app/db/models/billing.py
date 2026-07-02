@@ -22,6 +22,7 @@ class Plan(TimestampMixin, Base):
     price_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     currency: Mapped[str] = mapped_column(String(8), default="USD", nullable=False)
     billing_interval: Mapped[str] = mapped_column(String(16), default="month", nullable=False)
+    whop_plan_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
 
@@ -45,6 +46,7 @@ class BillingEvent(TimestampMixin, Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    external_event_id: Mapped[Optional[str]] = mapped_column(String(128), unique=True, nullable=True, index=True)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     processed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)
