@@ -18,9 +18,23 @@ class PlanResponse(BaseModel):
     billing_interval: str
     is_active: bool
     whop_plan_id: Optional[str] = None
+    plan_kind: str = "subscription"
+    addon_bonus_subscriptions: int = 0
     is_paid: bool = False
+    is_addon: bool = False
 
     model_config = {"from_attributes": True}
+
+
+class BillingAccessResponse(BaseModel):
+    max_subscriptions: int
+    max_timeframes: int
+    max_bars: int
+    trial_active: bool
+    trial_ends_at: Optional[datetime] = None
+    requires_upgrade: bool
+    is_paid: bool
+    bonus_subscriptions: int = 0
 
 
 class BillingSubscriptionResponse(BaseModel):
@@ -36,6 +50,7 @@ class BillingSubscriptionResponse(BaseModel):
 class BillingStatusResponse(BaseModel):
     plan: PlanResponse
     subscription: BillingSubscriptionResponse
+    access: BillingAccessResponse
 
 
 class CheckoutRequest(BaseModel):

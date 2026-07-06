@@ -78,6 +78,7 @@ DEV_USER_EMAIL = "admin@tradepulse.com"
 DEV_USER_PASSWORD = "admin123"
 ADMIN_PLAN_SLUG = "admin"
 PRO_PLAN_SLUG = "pro"
+ADDON_PLAN_SLUG = "addon-subs-50"
 PRO_WHOP_PLAN_ID = "plan_ZUwmW7PbwcLEF"
 ADMIN_TIMEFRAME_CODES = ("1m", "1h")
 
@@ -98,6 +99,7 @@ async def _ensure_pro_plan(db) -> Plan:
             currency="USD",
             billing_interval="month",
             whop_plan_id=PRO_WHOP_PLAN_ID,
+            plan_kind="subscription",
         )
         db.add(plan)
         await db.flush()
@@ -107,6 +109,39 @@ async def _ensure_pro_plan(db) -> Plan:
         plan.max_timeframes = 8
         plan.price_cents = 999
         plan.whop_plan_id = PRO_WHOP_PLAN_ID
+        plan.plan_kind = "subscription"
+        plan.is_active = True
+    return plan
+
+
+async def _ensure_addon_plan(db) -> Plan | None:
+    settings = get_settings()
+    whop_plan_id = settings.whop_addon_plan_id.strip()
+    if not whop_plan_id:
+        return None
+
+    plan = (await db.execute(select(Plan).where(Plan.slug == ADDON_PLAN_SLUG))).scalar_one_or_none()
+    if plan is None:
+        plan = Plan(
+            slug=ADDON_PLAN_SLUG,
+            name="+50 Subscriptions",
+            max_subscriptions=0,
+            max_timeframes=0,
+            price_cents=500,
+            currency="USD",
+            billing_interval="month",
+            whop_plan_id=whop_plan_id,
+            plan_kind="addon",
+            addon_bonus_subscriptions=50,
+        )
+        db.add(plan)
+        await db.flush()
+    else:
+        plan.name = "+50 Subscriptions"
+        plan.price_cents = 500
+        plan.whop_plan_id = whop_plan_id
+        plan.plan_kind = "addon"
+        plan.addon_bonus_subscriptions = 50
         plan.is_active = True
     return plan
 
@@ -122,6 +157,7 @@ async def _ensure_admin_plan(db) -> Plan:
             price_cents=0,
             currency="USD",
             billing_interval="month",
+            plan_kind="internal",
         )
         db.add(plan)
         await db.flush()
@@ -264,10 +300,14 @@ async def seed() -> None:
                     price_cents=0,
                     currency="USD",
                     billing_interval="month",
+                    plan_kind="internal",
                 )
             )
 
         await _ensure_pro_plan(db)
+        addon = await _ensure_addon_plan(db)
+        if addon is not None:
+            print(f"  Addon plan linked to Whop: {addon.whop_plan_id}")
 
         if (await db.execute(select(IndicatorType).where(IndicatorType.slug == "continuous_trend"))).scalar_one_or_none() is None:
             db.add(

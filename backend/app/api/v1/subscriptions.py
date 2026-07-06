@@ -20,6 +20,7 @@ from backend.app.schemas.catalog import (
     SubscriptionResponse,
     SubscriptionUpdate,
 )
+from backend.app.services.billing_access import UPGRADE_REQUIRED_DETAIL, get_effective_billing_access
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"], dependencies=[Depends(get_verified_user)])
 
@@ -41,15 +42,11 @@ async def _enrich_subscription(sub: UserSubscription, db: AsyncSession) -> Subsc
     return resp
 
 
-async def _check_plan_limits(user: User, db: AsyncSession) -> Plan:
-    sub_result = await db.execute(
-        select(Subscription).where(Subscription.user_id == user.id).options()
-    )
-    billing_sub = sub_result.scalar_one_or_none()
-    if billing_sub is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No billing plan assigned")
-    plan_result = await db.execute(select(Plan).where(Plan.id == billing_sub.plan_id))
-    return plan_result.scalar_one()
+async def _require_billing_access(user: User, db: AsyncSession):
+    access = await get_effective_billing_access(db, user)
+    if access.requires_upgrade:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=UPGRADE_REQUIRED_DETAIL)
+    return access
 
 
 @router.get("", response_model=list[SubscriptionResponse])
@@ -57,6 +54,7 @@ async def list_subscriptions(
     user: User = Depends(get_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[UserSubscription]:
+    await _require_billing_access(user, db)
     result = await db.execute(
         select(UserSubscription)
         .where(UserSubscription.user_id == user.id)
@@ -74,13 +72,13 @@ async def create_subscription(
     user: User = Depends(get_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> SubscriptionResponse:
-    plan = await _check_plan_limits(user, db)
+    access = await _require_billing_access(user, db)
     count_result = await db.execute(
         select(func.count()).select_from(UserSubscription).where(
             UserSubscription.user_id == user.id, UserSubscription.is_active.is_(True)
         )
     )
-    if (count_result.scalar() or 0) >= plan.max_subscriptions:
+    if (count_result.scalar() or 0) >= access.max_subscriptions:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Subscription limit reached")
 
     for model, id_ in [(Ticker, body.ticker_id), (Timeframe, body.timeframe_id), (IndicatorType, body.indicator_type_id)]:
@@ -99,7 +97,7 @@ async def create_subscription(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subscription already exists")
 
-    bars = body.bars or get_settings().default_subscription_bars
+    bars = body.bars or min(get_settings().default_subscription_bars, access.max_bars)
     sub = UserSubscription(
         user_id=user.id,
         ticker_id=body.ticker_id,
@@ -118,7 +116,7 @@ async def create_subscriptions_bulk(
     user: User = Depends(get_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> SubscriptionBulkResponse:
-    plan = await _check_plan_limits(user, db)
+    access = await _require_billing_access(user, db)
     unique_ticker_ids = list(dict.fromkeys(body.ticker_ids))
 
     tf = (
@@ -167,10 +165,10 @@ async def create_subscriptions_bulk(
     )
     active_count = count_result.scalar() or 0
     to_create_ids = [tid for tid in unique_ticker_ids if tid not in existing_ticker_ids]
-    if active_count + len(to_create_ids) > plan.max_subscriptions:
+    if active_count + len(to_create_ids) > access.max_subscriptions:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Subscription limit reached")
 
-    bars = body.bars or get_settings().default_subscription_bars
+    bars = body.bars or min(get_settings().default_subscription_bars, access.max_bars)
     created_subs: list[UserSubscription] = []
     for ticker_id in to_create_ids:
         sub = UserSubscription(
@@ -201,6 +199,7 @@ async def update_subscription(
     user: User = Depends(get_verified_user),
     db: AsyncSession = Depends(get_db),
 ) -> SubscriptionResponse:
+    await _require_billing_access(user, db)
     result = await db.execute(
         select(UserSubscription).where(
             UserSubscription.id == subscription_id, UserSubscription.user_id == user.id

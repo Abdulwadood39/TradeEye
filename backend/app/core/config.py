@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     whop_company_id: str = ""
     whop_webhook_secret: str = ""
     whop_billing_success_path: str = "/billing/success"
+    whop_addon_plan_id: str = ""
+
+    # New users get full platform access for this many days, then must upgrade to Pro.
+    trial_days: int = 3
+    trial_max_subscriptions: int = 100
+    trial_max_timeframes: int = 8
 
     @property
     def whop_configured(self) -> bool:

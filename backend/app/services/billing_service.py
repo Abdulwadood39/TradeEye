@@ -7,20 +7,48 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from whop_sdk import BadRequestError, PermissionDeniedError, Whop
 
 from backend.app.core.config import Settings, get_settings
-from backend.app.db.models.billing import BillingEvent, Plan, Subscription
+from backend.app.db.models.billing import BillingEvent, Plan, Subscription, UserPlanAddon
 from backend.app.db.models.user import User
+from backend.app.services.billing_constants import (
+    ACTIVE_BILLING_STATUSES,
+    ADMIN_PLAN_SLUG,
+    BILLING_PROVIDER,
+    FREE_PLAN_SLUG,
+    PLAN_KIND_ADDON,
+    PLAN_KIND_INTERNAL,
+    PLAN_KIND_SUBSCRIPTION,
+)
 from backend.app.services.whop_client import get_whop_client
 
 logger = logging.getLogger(__name__)
 
-ACTIVE_BILLING_STATUSES = frozenset({"active", "trialing", "past_due"})
-FREE_PLAN_SLUG = "free"
-BILLING_PROVIDER = "whop"
+
+async def recalculate_bonus_subscriptions(db: AsyncSession, billing_sub: Subscription) -> int:
+    result = await db.execute(
+        select(func.coalesce(func.sum(UserPlanAddon.bonus_subscriptions), 0)).where(
+            UserPlanAddon.subscription_id == billing_sub.id,
+            UserPlanAddon.status == "active",
+        )
+    )
+    total = int(result.scalar() or 0)
+    billing_sub.bonus_subscriptions = total
+    await db.flush()
+    return total
+
+from backend.app.services.billing_constants import (
+    ACTIVE_BILLING_STATUSES,
+    ADMIN_PLAN_SLUG,
+    BILLING_PROVIDER,
+    FREE_PLAN_SLUG,
+    PLAN_KIND_ADDON,
+    PLAN_KIND_INTERNAL,
+    PLAN_KIND_SUBSCRIPTION,
+)
 
 
 def plan_to_response(plan: Plan) -> dict[str, Any]:
@@ -35,7 +63,10 @@ def plan_to_response(plan: Plan) -> dict[str, Any]:
         "billing_interval": plan.billing_interval,
         "is_active": plan.is_active,
         "whop_plan_id": plan.whop_plan_id,
+        "plan_kind": plan.plan_kind,
+        "addon_bonus_subscriptions": plan.addon_bonus_subscriptions,
         "is_paid": bool(plan.whop_plan_id and plan.price_cents > 0),
+        "is_addon": plan.plan_kind == PLAN_KIND_ADDON,
     }
 
 
@@ -73,8 +104,14 @@ async def resolve_plan_for_whop_id(db: AsyncSession, whop_plan_id: str) -> Plan 
     return result.scalar_one_or_none()
 
 
-async def list_public_plans(db: AsyncSession) -> list[Plan]:
-    result = await db.execute(select(Plan).where(Plan.is_active.is_(True)).order_by(Plan.price_cents, Plan.name))
+async def list_public_plans(db: AsyncSession, *, include_internal: bool = False) -> list[Plan]:
+    query = select(Plan).where(Plan.is_active.is_(True))
+    if not include_internal:
+        query = query.where(
+            Plan.whop_plan_id.isnot(None),
+            Plan.plan_kind.in_((PLAN_KIND_SUBSCRIPTION, PLAN_KIND_ADDON)),
+        )
+    result = await db.execute(query.order_by(Plan.price_cents, Plan.name))
     return list(result.scalars().all())
 
 
@@ -209,10 +246,36 @@ async def apply_membership_activated(db: AsyncSession, membership: Any) -> Subsc
         return None
 
     billing_sub = await _ensure_billing_subscription(db, user)
+    membership_id = getattr(membership, "id", None)
+    status = _normalize_membership_status(getattr(membership, "status", None))
+
+    if plan.plan_kind == PLAN_KIND_ADDON:
+        if not membership_id:
+            return billing_sub
+        existing = await db.execute(
+            select(UserPlanAddon).where(UserPlanAddon.provider_membership_id == membership_id)
+        )
+        addon = existing.scalar_one_or_none()
+        if addon is None:
+            addon = UserPlanAddon(
+                subscription_id=billing_sub.id,
+                plan_id=plan.id,
+                provider_membership_id=membership_id,
+                bonus_subscriptions=plan.addon_bonus_subscriptions,
+                status=status,
+            )
+            db.add(addon)
+        else:
+            addon.status = status
+            addon.bonus_subscriptions = plan.addon_bonus_subscriptions
+        await recalculate_bonus_subscriptions(db, billing_sub)
+        await db.flush()
+        return billing_sub
+
     billing_sub.plan_id = plan.id
-    billing_sub.status = _normalize_membership_status(getattr(membership, "status", None))
+    billing_sub.status = status
     billing_sub.provider = BILLING_PROVIDER
-    billing_sub.provider_subscription_id = getattr(membership, "id", None)
+    billing_sub.provider_subscription_id = membership_id
     whop_user = getattr(membership, "user", None)
     billing_sub.provider_customer_id = getattr(whop_user, "id", None) if whop_user is not None else None
     billing_sub.current_period_start = getattr(membership, "renewal_period_start", None)
@@ -230,6 +293,21 @@ async def apply_membership_deactivated(db: AsyncSession, membership: Any) -> Sub
     billing_sub = await get_user_billing_subscription(db, user.id)
     if billing_sub is None:
         return None
+
+    membership_id = getattr(membership, "id", None)
+    whop_plan_id = getattr(getattr(membership, "plan", None), "id", None)
+    plan = await resolve_plan_for_whop_id(db, whop_plan_id) if whop_plan_id else None
+
+    if plan is not None and plan.plan_kind == PLAN_KIND_ADDON and membership_id:
+        addon_result = await db.execute(
+            select(UserPlanAddon).where(UserPlanAddon.provider_membership_id == membership_id)
+        )
+        addon = addon_result.scalar_one_or_none()
+        if addon is not None:
+            addon.status = "canceled"
+        await recalculate_bonus_subscriptions(db, billing_sub)
+        await db.flush()
+        return billing_sub
 
     free_plan = await get_free_plan(db)
     if free_plan is None:

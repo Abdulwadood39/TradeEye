@@ -23,6 +23,9 @@ class Plan(TimestampMixin, Base):
     currency: Mapped[str] = mapped_column(String(8), default="USD", nullable=False)
     billing_interval: Mapped[str] = mapped_column(String(16), default="month", nullable=False)
     whop_plan_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True)
+    # internal = free/admin (not sold); subscription = base paid tier; addon = purchasable boost
+    plan_kind: Mapped[str] = mapped_column(String(16), default="subscription", nullable=False)
+    addon_bonus_subscriptions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
 
@@ -39,6 +42,18 @@ class Subscription(TimestampMixin, Base):
     current_period_start: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)
     current_period_end: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)
     canceled_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime(), nullable=True)
+    bonus_subscriptions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class UserPlanAddon(TimestampMixin, Base):
+    __tablename__ = "user_plan_addons"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    subscription_id: Mapped[uuid.UUID] = uuid_fk("subscriptions.id", nullable=False)
+    plan_id: Mapped[uuid.UUID] = uuid_fk("plans.id", nullable=False)
+    provider_membership_id: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    bonus_subscriptions: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
 
 
 class BillingEvent(TimestampMixin, Base):
