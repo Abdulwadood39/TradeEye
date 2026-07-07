@@ -1,9 +1,11 @@
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+import asyncio
 import pandas as pd
+import pytest
 
-from backend.app.services.scan_coordinator import GroupScanInput, _process_group
+from backend.app.services.scan_coordinator import GroupScanInput, _collect_group_outputs, _process_group
 
 
 def _make_df(n: int) -> pd.DataFrame:
@@ -92,3 +94,45 @@ def test_single_fetch_max_bars(mock_fetch, chart_tmp_dir):
         _process_group(inp)
 
     mock_fetch.assert_called_once_with("AAPL", "1h", 1000)
+
+
+@pytest.mark.asyncio
+async def test_collect_group_outputs_does_not_block_event_loop(chart_tmp_dir):
+    async def heartbeat() -> int:
+        ticks = 0
+        for _ in range(5):
+            await asyncio.sleep(0.01)
+            ticks += 1
+        return ticks
+
+    def slow_group(inp: GroupScanInput) -> list:
+        import time
+
+        time.sleep(0.05)
+        return []
+
+    scan_inputs = [
+        GroupScanInput(
+            ticker_id=uuid4(),
+            yfinance_symbol=f"T{i}",
+            display_name=f"T{i}",
+            timeframe_code="1h",
+            indicator_type_id=uuid4(),
+            indicator_slug="continuous_trend",
+            unique_bars=[100],
+            max_bars=100,
+            users_by_bars={100: [uuid4()]},
+            scan_run_id=uuid4(),
+            chart_tmp_dir=chart_tmp_dir,
+        )
+        for i in range(3)
+    ]
+
+    with patch("backend.app.services.scan_coordinator._process_group", side_effect=slow_group):
+        scan_task = asyncio.create_task(
+            _collect_group_outputs(scan_inputs, timeframe_id=uuid4(), max_workers=2)
+        )
+        ticks = await heartbeat()
+        await scan_task
+
+    assert ticks == 5

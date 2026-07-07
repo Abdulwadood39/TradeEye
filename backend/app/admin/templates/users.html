@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Users — TradeEye Admin{% endblock %}
+{% block content %}
+<h1>Users</h1>
+{% if flash %}
+<p><mark>{{ flash }}</mark></p>
+{% endif %}
+<table>
+  <thead>
+    <tr>
+      <th>Email</th>
+      <th>Name</th>
+      <th>Registered</th>
+      <th>Plan</th>
+      <th>Paid</th>
+      <th>Verified</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.email }}</td>
+      <td>{{ u.full_name }}</td>
+      <td>{{ u.created_at }}</td>
+      <td>{{ u.plan_name }}</td>
+      <td>{{ "Yes" if u.is_paid else "No" }}</td>
+      <td>{{ "Yes" if u.email_verified else "No" }}</td>
+      <td>
+        <form method="post" action="/admin/users/{{ u.id }}/delete" onsubmit="return confirm('Delete {{ u.email }}? This cannot be undone.');">
+          <button type="submit" class="secondary outline">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7">No users yet</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

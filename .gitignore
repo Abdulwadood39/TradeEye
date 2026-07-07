@@ -2,6 +2,7 @@
 __pycache__
 
 .env
+.env.prod
 .extras
 
 trend_scanner/output/*

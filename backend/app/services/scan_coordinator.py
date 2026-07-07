@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
@@ -106,6 +107,33 @@ def _process_group(inp: GroupScanInput) -> list[GroupScanOutput]:
     return outputs
 
 
+async def _collect_group_outputs(
+    scan_inputs: list[GroupScanInput],
+    *,
+    timeframe_id: UUID,
+    max_workers: int,
+) -> list[GroupScanOutput]:
+    """Run ticker analysis in a thread pool without blocking the asyncio event loop."""
+    if not scan_inputs:
+        return []
+
+    loop = asyncio.get_running_loop()
+    all_outputs: list[GroupScanOutput] = []
+    tickers_done = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        tasks = [loop.run_in_executor(pool, _process_group, inp) for inp in scan_inputs]
+        for finished in asyncio.as_completed(tasks):
+            tickers_done += 1
+            update_progress(timeframe_id, tickers_done=tickers_done)
+            try:
+                all_outputs.extend(await finished)
+            except Exception as exc:
+                logger.error("Group scan failed: %s", exc)
+
+    return all_outputs
+
+
 class ScanCoordinator:
     async def run_timeframe_scan(self, timeframe_id: UUID) -> None:
         try:
@@ -173,7 +201,7 @@ class ScanCoordinator:
                         unique_bars=sorted(set(bars_list)),
                         max_bars=max(bars_list),
                         users_by_bars=dict(users_by_bars),
-                        scan_run_id=UUID(int=0),  # set after scan_run is created
+                        scan_run_id=UUID(int=0),
                         chart_tmp_dir=settings.chart_tmp_dir,
                     )
                 )
@@ -195,19 +223,22 @@ class ScanCoordinator:
             for inp in scan_inputs:
                 inp.scan_run_id = scan_run.id
 
-            all_outputs: list[GroupScanOutput] = []
-            tickers_done = 0
-            try:
-                with ThreadPoolExecutor(max_workers=settings.scan_workers) as pool:
-                    futures = [pool.submit(_process_group, inp) for inp in scan_inputs]
-                    for future in as_completed(futures):
-                        tickers_done += 1
-                        update_progress(timeframe_id, tickers_done=tickers_done)
-                        try:
-                            all_outputs.extend(future.result())
-                        except Exception as exc:
-                            logger.error("Group scan failed: %s", exc)
+            scan_run_id = scan_run.id
+            timeframe_code = timeframe.code
+            tickers_total = len(scan_inputs)
+            await db.commit()
 
+        try:
+            all_outputs = await _collect_group_outputs(
+                scan_inputs,
+                timeframe_id=timeframe_id,
+                max_workers=settings.scan_workers,
+            )
+
+            async with async_session_factory() as db:
+                scan_run = (
+                    await db.execute(select(ScanRun).where(ScanRun.id == scan_run_id))
+                ).scalar_one()
                 notify_service = NotificationService(db)
                 trends_found = 0
 
@@ -241,7 +272,7 @@ class ScanCoordinator:
                                 user_id=user_id,
                                 display_name=output.display_name,
                                 yfinance_symbol=output.yfinance_symbol,
-                                timeframe=timeframe.code,
+                                timeframe=timeframe_code,
                                 direction=output.direction,
                                 score=output.score,
                                 confidence=output.confidence,
@@ -261,14 +292,14 @@ class ScanCoordinator:
                 update_progress(timeframe_id, trends_found=trends_found)
                 scan_run.status = "completed"
                 scan_run.finished_at = datetime.now(timezone.utc)
-                scan_run.tickers_scanned = len(scan_inputs)
+                scan_run.tickers_scanned = tickers_total
                 scan_run.trends_found = trends_found
                 await db.commit()
                 logger.info(
                     "Scan completed for %s: %d tickers, %d trends",
-                    timeframe.code,
-                    len(scan_inputs),
+                    timeframe_code,
+                    tickers_total,
                     trends_found,
                 )
-            finally:
-                finish_job(timeframe_id)
+        finally:
+            finish_job(timeframe_id)

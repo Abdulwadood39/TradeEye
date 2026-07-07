@@ -19,6 +19,10 @@ class TrendConfig:
     # ── Signal 2: Mann-Kendall Trend Test ─────────────────────────────────────
     # Significance level (p-value threshold). Lower = stricter.
     mk_alpha: float = 0.05
+    # Optional |tau| floor (0 = disabled). Old scanner used alpha only.
+    mk_tau_min: float = 0.0
+    # Subsample long series before MK test (0 = use full series, like old scanner).
+    mk_subsample_to: int = 0
 
     # ── Signal 3: ADX ─────────────────────────────────────────────────────────
     adx_period: int = 14
@@ -29,7 +33,7 @@ class TrendConfig:
 
     # ── Signal 4: Market Structure (Higher Highs / Higher Lows) ───────────────
     pivot_order: int = 5           # how many bars each side for swing pivots
-    hh_hl_min_ratio: float = 0.55  # fraction of pivots that must be HH+HL (uptrend)
+    hh_hl_min_ratio: float = 0.60  # fraction of pivots that must be HH+HL (uptrend)
 
     # ── Signal 5: Pivot Regression Channel ────────────────────────────────────
     channel_slope_min_bps: float = 0.20
@@ -40,7 +44,8 @@ class TrendConfig:
 
     # ── Candle window per timeframe ────────────────────────────────────────────
     # How many candles are sliced for analysis.
-    # Add new timeframes freely — the engine falls back to 2500 for unknown TFs.
+    # Unknown timeframes fall back to analysis_window (legacy default: 3000).
+    analysis_window: int = 3000
     analysis_windows: Dict[str, int] = field(default_factory=lambda: {
         "1m":  2500,
         "5m":  2500,
@@ -53,5 +58,5 @@ class TrendConfig:
     })
 
     def window_for(self, timeframe: str) -> int:
-        """Return the analysis candle window for a timeframe (fallback: 2500)."""
-        return self.analysis_windows.get(timeframe, 2500)
+        """Return the analysis candle window for a timeframe."""
+        return self.analysis_windows.get(timeframe, self.analysis_window)

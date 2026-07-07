@@ -1,4 +1,4 @@
-from backend.app.db.models.billing import BillingEvent, Plan, Subscription
+from backend.app.db.models.billing import BillingEvent, Plan, Subscription, UserPlanAddon
 from backend.app.db.models.catalog import IndicatorType, Ticker, Timeframe, TimeframeScanSchedule
 from backend.app.db.models.scan import NotificationMessage, ScanRun, TrendEvent
 from backend.app.db.models.user import (
@@ -24,5 +24,6 @@ __all__ = [
     "NotificationMessage",
     "Plan",
     "Subscription",
+    "UserPlanAddon",
     "BillingEvent",
 ]

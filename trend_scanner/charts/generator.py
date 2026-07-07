@@ -66,7 +66,9 @@ def generate_chart(
     cfg = chart_cfg or CFG.chart
 
     # Limit to exactly what the engine analyzed
-    window = result.candles_analyzed if result.candles_analyzed > 0 else min(CFG.trend.analysis_window, len(df))
+    window = result.candles_analyzed if result.candles_analyzed > 0 else min(
+        CFG.trend.window_for(timeframe), len(df)
+    )
     plot_df = df.iloc[-window:].reset_index(drop=True)
 
     try:

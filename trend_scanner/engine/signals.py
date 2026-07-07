@@ -80,9 +80,9 @@ def signal_mann_kendall(df: pd.DataFrame) -> SignalResult:
     """
     close = df["close"].values.astype(np.float64)
 
-    if len(close) > 300:
-        # Subsample to 150 evenly spaced points to avoid over-powered p-values
-        idx = np.linspace(0, len(close) - 1, 150, dtype=int)
+    subsample_to = CFG.trend.mk_subsample_to
+    if subsample_to > 0 and len(close) > subsample_to:
+        idx = np.linspace(0, len(close) - 1, subsample_to, dtype=int)
         close = close[idx]
 
     try:
@@ -105,8 +105,9 @@ def signal_mann_kendall(df: pd.DataFrame) -> SignalResult:
         elif "decreasing" in trend_str or (isinstance(trend_str, str) and trend_str == "down"):
             direction = "down"
 
-    TAU_MIN = 0.25
-    passed = is_significant and direction != "none" and abs(float(tau)) >= TAU_MIN
+    tau_min = CFG.trend.mk_tau_min
+    tau_ok = tau_min <= 0 or abs(float(tau)) >= tau_min
+    passed = is_significant and direction != "none" and tau_ok
 
     # Score based on how far below alpha the p-value is (stronger = lower p)
     score = min(1.0 - p_value, 1.0) if is_significant else 0.0

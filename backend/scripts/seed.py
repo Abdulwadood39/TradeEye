@@ -80,7 +80,6 @@ ADMIN_PLAN_SLUG = "admin"
 PRO_PLAN_SLUG = "pro"
 ADDON_PLAN_SLUG = "addon-subs-50"
 PRO_WHOP_PLAN_ID = "plan_ZUwmW7PbwcLEF"
-ADMIN_TIMEFRAME_CODES = ("1m", "1h")
 
 
 def _admin_discord_webhook_url() -> str | None:
@@ -152,7 +151,7 @@ async def _ensure_admin_plan(db) -> Plan:
         plan = Plan(
             slug=ADMIN_PLAN_SLUG,
             name="Admin Plan",
-            max_subscriptions=1000,
+            max_subscriptions=2000,
             max_timeframes=8,
             price_cents=0,
             currency="USD",
@@ -169,12 +168,9 @@ async def _seed_admin_subscriptions(db, user: User) -> None:
         await db.execute(select(IndicatorType).where(IndicatorType.slug == "continuous_trend"))
     ).scalar_one()
     timeframes = list(
-        (
-            await db.execute(
-                select(Timeframe).where(Timeframe.code.in_(ADMIN_TIMEFRAME_CODES), Timeframe.is_active.is_(True))
-            )
-        ).scalars()
+        (await db.execute(select(Timeframe).where(Timeframe.is_active.is_(True)))).scalars().all()
     )
+    timeframes.sort(key=lambda tf: tf.code)
     tickers = list((await db.execute(select(Ticker).where(Ticker.is_active.is_(True)))).scalars())
     if not timeframes or not tickers:
         print("  Skipping admin subscriptions (no tickers or timeframes)")

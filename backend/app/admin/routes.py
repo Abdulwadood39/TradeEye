@@ -8,7 +8,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.admin.auth import is_admin_authenticated, require_admin, verify_admin_credentials
@@ -16,9 +16,10 @@ from backend.app.core.config import get_settings
 from backend.app.db.models.billing import Plan
 from backend.app.db.models.catalog import IndicatorType, Ticker, Timeframe, TimeframeScanSchedule
 from backend.app.db.models.scan import ScanRun
-from backend.app.db.models.user import User, UserSubscription
+from backend.app.db.models.user import User
 from backend.app.db.session import get_db
 from backend.app.services.scan_scheduler import list_running_jobs, reload_schedule, reset_and_run_schedule
+from backend.app.services.user_service import UserDeletionError, delete_user_account, get_admin_user_stats, list_admin_users
 
 templates = Jinja2Templates(directory="backend/app/admin/templates")
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -48,16 +49,41 @@ async def admin_logout(request: Request):
 @router.get("/", response_class=HTMLResponse)
 async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)) -> HTMLResponse:
     require_admin(request)
-    users = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
-    subs = (await db.execute(select(func.count()).select_from(UserSubscription))).scalar() or 0
+    stats = await get_admin_user_stats(db)
     runs = (
         await db.execute(select(ScanRun).order_by(ScanRun.started_at.desc()).limit(10))
     ).scalars().all()
     return templates.TemplateResponse(
         request,
         "dashboard.html",
-        {"users": users, "subs": subs, "runs": runs},
+        {
+            "registered_users": stats.registered_users,
+            "paid_users": stats.paid_users,
+            "addons_sold": stats.addons_sold,
+            "runs": runs,
+        },
     )
+
+
+@router.get("/users", response_class=HTMLResponse)
+async def admin_users(request: Request, db: AsyncSession = Depends(get_db)) -> HTMLResponse:
+    require_admin(request)
+    users = await list_admin_users(db)
+    flash = request.query_params.get("flash")
+    return templates.TemplateResponse(request, "users.html", {"users": users, "flash": flash})
+
+
+@router.post("/users/{user_id}/delete")
+async def admin_delete_user(user_id: UUID, request: Request, db: AsyncSession = Depends(get_db)):
+    require_admin(request)
+    try:
+        await delete_user_account(db, user_id)
+        await db.commit()
+        flash = "User deleted."
+    except UserDeletionError as exc:
+        await db.rollback()
+        flash = str(exc)
+    return RedirectResponse(f"/admin/users?flash={quote(flash)}", status_code=303)
 
 
 @router.get("/tickers", response_class=HTMLResponse)
